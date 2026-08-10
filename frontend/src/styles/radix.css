@@ -1,0 +1,50 @@
+/* Radix / shadcn integration
+ *
+ * The generated components carry Tailwind classes that resolve through the
+ * @theme bridge in index.css, so they already inherit the validated palette.
+ *
+ * Control geometry is NOT set here. Our stylesheets live in the `components`
+ * cascade layer, so any rule that collided with a utility on those components
+ * would silently lose — trigger sizing and border states are passed as
+ * utilities from Fields.tsx instead. What remains below is the surface styling
+ * for portalled content, which carries no competing utilities.
+ */
+
+/* Radix portals its overlays outside .main, so these are addressed globally
+ * rather than through a page scope. */
+[data-radix-popper-content-wrapper] {
+  z-index: 60;
+}
+
+/* The tier swatches invert inside the dark tooltip surface; the hatch is
+ * drawn with the surface colour so it has to flip too. */
+/* Dialog surface — border-first, matching the card vocabulary */
+[data-slot="dialog-content"] {
+  border-radius: var(--r-card-lg);
+}
+
+[data-slot="dialog-overlay"] {
+  background: rgba(10, 10, 10, 0.4);
+}
+
+/* A white toast on a white canvas needs elevation to read as a layer —
+ * the hairline border alone is not enough separation here. */
+[data-sonner-toast] {
+  box-shadow: var(--shadow-md);
+}
+
+.policy-list {
+  display: grid;
+}
+
+.policy-list > li {
+  padding: var(--sp-3) 0;
+  color: var(--ink-3);
+  font-size: var(--text-body);
+  line-height: 1.5;
+  border-bottom: 1px solid var(--line);
+}
+
+.policy-list > li:last-child {
+  border-bottom: 0;
+}

@@ -1,0 +1,703 @@
+/* Components — border-first vocabulary shared across every page */
+
+/* ---------------------------------------------------------------------------
+ * Buttons & links
+ * ------------------------------------------------------------------------ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-height: 36px;
+  padding: var(--sp-2) var(--sp-4);
+  color: var(--ink);
+  background: var(--canvas);
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+  border: 1px solid var(--line);
+  border-radius: var(--r-button);
+  white-space: nowrap;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--paper-strong);
+  border-color: var(--line-strong);
+}
+
+/* The committed action. One per surface — never decorative. */
+.btn-primary {
+  color: var(--action-ink);
+  background: var(--action-fill);
+  border-color: var(--action-fill);
+}
+
+.btn-primary:hover:not(:disabled) {
+  color: var(--action-ink);
+  background: var(--ink-2);
+  border-color: var(--ink-2);
+}
+
+.btn-sm {
+  min-height: 30px;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--text-micro);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  color: var(--ink-faint);
+  background: var(--paper-strong);
+  border-color: var(--line);
+}
+
+.btn-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--ink-muted);
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--r-button);
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.btn-icon:hover {
+  color: var(--ink);
+  background: var(--paper-strong);
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--accent);
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+}
+
+.link:hover {
+  color: var(--accent-deep);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Surfaces — 1px borders define containers. Shadows stay rare.
+ * ------------------------------------------------------------------------ */
+
+.card {
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+}
+
+.card-pad {
+  padding: var(--sp-6);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--line);
+}
+
+.card-head-text > h2 {
+  font-size: var(--text-body-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.card-head-text > p {
+  margin-top: 2px;
+  color: var(--ink-faint);
+  font-size: var(--text-body);
+}
+
+.card-head-aside {
+  flex: none;
+  color: var(--ink-faint);
+  font-size: var(--text-micro);
+  font-variant-numeric: tabular-nums;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+/* ---------------------------------------------------------------------------
+ * Pills & tags
+ * ------------------------------------------------------------------------ */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  color: var(--ink-muted);
+  background: var(--status-idle-tint);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-medium);
+  line-height: 1.25;
+  white-space: nowrap;
+  border-radius: var(--r-pill);
+}
+
+.pill > .dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--r-pill);
+  background: currentColor;
+}
+
+.pill-good {
+  color: var(--status-good);
+  background: var(--status-good-tint);
+}
+
+.pill-warn {
+  color: var(--status-warn);
+  background: var(--status-warn-tint);
+}
+
+.pill-bad {
+  color: var(--status-bad);
+  background: var(--status-bad-tint);
+}
+
+.pill-info {
+  color: var(--status-info);
+  background: var(--status-info-tint);
+}
+
+.pill-sm {
+  padding: 3px 8px;
+  font-size: var(--text-caption);
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  color: var(--ink-muted);
+  background: var(--paper-strong);
+  border-radius: var(--r-pill);
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+ * Notices
+ * ------------------------------------------------------------------------ */
+
+.notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+}
+
+.notice-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  color: var(--ink-muted);
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--r-button);
+}
+
+.notice-body > strong {
+  display: block;
+  font-size: var(--text-body-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.notice-body > p {
+  margin-top: 3px;
+  color: var(--ink-muted);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+}
+
+.notice-warn {
+  background: var(--status-warn-tint);
+  border-color: var(--status-warn-line);
+}
+
+.notice-warn .notice-icon {
+  color: var(--status-warn);
+  border-color: var(--status-warn-line);
+}
+
+.notice-bad {
+  background: var(--status-bad-tint);
+  border-color: var(--status-bad-line);
+}
+
+.notice-bad .notice-icon {
+  color: var(--status-bad);
+  border-color: var(--status-bad-line);
+}
+
+/* ---------------------------------------------------------------------------
+ * Confidence figures
+ * ------------------------------------------------------------------------ */
+
+.confidence-number {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+  font-family: var(--font-display);
+  line-height: 1;
+  letter-spacing: var(--tracking-latin);
+  font-variant-numeric: tabular-nums;
+}
+
+.confidence-number > strong {
+  font-weight: var(--weight-medium);
+}
+
+.confidence-number.is-lg > strong {
+  font-size: 40px;
+}
+
+.confidence-number.is-md > strong {
+  font-size: 28px;
+}
+
+.confidence-number > span {
+  color: var(--ink-faint);
+  font-size: var(--text-body-lg);
+  font-weight: var(--weight-medium);
+}
+
+.confidence-number.is-good > strong {
+  color: var(--status-good);
+}
+
+.confidence-number.is-caution > strong {
+  color: var(--status-warn);
+}
+
+.confidence-number.is-risk > strong {
+  color: var(--status-bad);
+}
+
+.meter {
+  display: grid;
+  grid-template-columns: minmax(56px, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 132px;
+}
+
+.meter-track {
+  height: 6px;
+  overflow: hidden;
+  background: var(--paper-strong);
+  border-radius: var(--r-pill);
+}
+
+.meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+}
+
+.meter-fill.is-good {
+  background: var(--status-good);
+}
+
+.meter-fill.is-caution {
+  background: var(--status-warn);
+}
+
+.meter-fill.is-risk {
+  background: var(--status-bad);
+}
+
+.meter-value {
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------------------
+ * Sparkline
+ * ------------------------------------------------------------------------ */
+
+.spark {
+  display: block;
+  flex: none;
+}
+
+.spark-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.spark-area {
+  stroke: none;
+  opacity: 0.09;
+}
+
+.spark-dot {
+  stroke: var(--canvas);
+  stroke-width: 2;
+}
+
+.spark-good {
+  color: var(--status-good);
+}
+
+.spark-caution {
+  color: var(--status-warn);
+}
+
+.spark-risk {
+  color: var(--status-bad);
+}
+
+/* ---------------------------------------------------------------------------
+ * Forms
+ * ------------------------------------------------------------------------ */
+
+.step-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-5);
+}
+
+.step-num {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  color: var(--action-ink);
+  background: var(--action-fill);
+  border-radius: var(--r-pill);
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+}
+
+.step-head h2 {
+  font-size: var(--text-body-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.step-head p {
+  margin-top: 2px;
+  color: var(--ink-faint);
+  font-size: var(--text-body);
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.field.is-full {
+  grid-column: 1 / -1;
+}
+
+.field > span {
+  color: var(--ink-3);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-medium);
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  min-width: 0;
+  color: var(--ink);
+  font-size: var(--text-body);
+  background: var(--canvas);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-input);
+  outline: 0;
+  transition: border-color var(--dur) var(--ease);
+}
+
+.field input,
+.field select {
+  height: 38px;
+  padding: 0 var(--sp-3);
+}
+
+.field textarea {
+  resize: vertical;
+  min-height: 72px;
+  padding: var(--sp-2) var(--sp-3);
+  line-height: 1.5;
+  font-family: inherit;
+}
+
+/* The near-black border is spent on the field actually in play, not on every
+ * field at rest — a form of eight black boxes reads as noise. */
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  border-color: var(--ink-deep);
+}
+
+/* Credential inputs carry it at rest: they are the field that matters. */
+.secret {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 38px;
+  padding: 0 var(--sp-2) 0 var(--sp-3);
+  color: var(--ink-faint);
+  background: var(--canvas);
+  border: 1px solid var(--ink-deep);
+  border-radius: var(--r-input);
+}
+
+.secret input {
+  height: 100%;
+  padding: 0;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-body);
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+
+.secret input::placeholder {
+  font-family: var(--font-sans);
+  color: var(--ink-faint);
+}
+
+.secret > button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  color: var(--ink-faint);
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-input);
+}
+
+.secret > button:hover {
+  color: var(--ink);
+  background: var(--paper-strong);
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  color: var(--ink-3);
+  font-size: var(--text-body);
+  line-height: 1.5;
+}
+
+.check + .check {
+  margin-top: var(--sp-2);
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  margin-top: var(--sp-5);
+}
+
+.form-actions > span {
+  color: var(--ink-faint);
+  font-size: var(--text-micro);
+}
+
+/* Choice cards */
+.choice-grid {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.choice-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.choice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  min-height: 64px;
+  color: var(--ink-muted);
+  text-align: left;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+.choice:hover {
+  border-color: var(--line-heavy);
+}
+
+.choice.is-active {
+  background: var(--accent-tint-soft);
+  border-color: var(--accent);
+}
+
+.choice.is-active > svg:last-child {
+  color: var(--accent);
+}
+
+.choice-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.choice-text > strong {
+  color: var(--ink);
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+}
+
+.choice-text > small {
+  color: var(--ink-faint);
+  font-size: var(--text-micro);
+}
+
+.choice-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  color: var(--ink-3);
+  background: var(--paper-strong);
+  border-radius: var(--r-button);
+}
+
+.choice.is-active .choice-icon {
+  color: var(--accent-deep);
+  background: var(--accent-tint);
+}
+
+/* ---------------------------------------------------------------------------
+ * Definition list & empty state
+ * ------------------------------------------------------------------------ */
+
+.def-list {
+  display: grid;
+  padding: var(--sp-2) var(--sp-5);
+}
+
+.def-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  min-height: 40px;
+  border-bottom: 1px solid var(--line);
+}
+
+.def-list > div:last-child {
+  border-bottom: 0;
+}
+
+.def-list dt {
+  color: var(--ink-faint);
+  font-size: var(--text-micro);
+}
+
+.def-list dd {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: var(--sp-2);
+  min-height: 180px;
+  padding: var(--sp-6);
+  text-align: center;
+}
+
+.empty > svg {
+  color: var(--ink-disabled);
+}
+
+.empty > strong {
+  font-size: var(--text-body-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.empty > p {
+  max-width: 46ch;
+  color: var(--ink-faint);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+}
+
+/* ---------------------------------------------------------------------------
+ * Responsive
+ * ------------------------------------------------------------------------ */
+
+@media (max-width: 700px) {
+  .field-grid,
+  .choice-grid-3 {
+    grid-template-columns: 1fr;
+  }
+
+  .card-head {
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+    padding: var(--sp-4);
+  }
+
+  .card-pad {
+    padding: var(--sp-5);
+  }
+
+  .form-actions {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--sp-3);
+  }
+
+  .notice {
+    padding: var(--sp-4);
+  }
+}

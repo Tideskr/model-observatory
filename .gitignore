@@ -1,0 +1,23 @@
+# Archived snapshot of the original detector — excluded from this repository.
+# Its licensing is unresolved (see README), and it contains a captured raw
+# HTTP request from a real client.
+Legacy/
+
+# Local tool settings
+.claude/settings.local.json
+
+# Dependencies & build output
+node_modules
+dist
+dist-ssr
+
+# Logs
+logs
+*.log
+
+# OS / editor
+.DS_Store
+.idea
+.vscode/*
+!.vscode/extensions.json
+*.local

@@ -1,0 +1,153 @@
+/*
+ * Design tokens
+ * ---------------------------------------------------------------------------
+ * Light canvas, hairline borders instead of elevation, one saturated accent,
+ * compact density, a disciplined radius vocabulary.
+ *
+ * One deliberate extension: a status scale with reserved meaning, never reused
+ * for decoration. Every status text step is verified at >= 4.5:1 against both
+ * white and its own tint.
+ */
+
+:root {
+  /* ---------------------------------------------------------------------
+   * Neutrals & surfaces
+   * ------------------------------------------------------------------ */
+  --canvas: #ffffff;
+  --paper: #fafafa;
+  --paper-strong: #f5f5f5;
+
+  --line: #e5e5e5;
+  --line-strong: #d4d4d4;
+  --line-heavy: #c8c8c8;
+
+  --ink: #171717;
+  --ink-deep: #0a0a0a;
+  --ink-2: #262626;
+  --ink-3: #404040;
+  --ink-muted: #525252;
+  --ink-faint: #737373;
+  /* Decorative strokes and disabled glyphs only — 2.52:1, never text. */
+  --ink-disabled: #a3a3a3;
+
+  /* ---------------------------------------------------------------------
+   * Accent — one saturated blue. Highlight, never a large fill.
+   * ------------------------------------------------------------------ */
+  --accent: #2563eb;
+  --accent-deep: #1e40af;
+  --accent-tint: #dbeafe;
+  --accent-tint-soft: #eff6ff;
+
+  /* Committed action fill — high-contrast neutral, one per surface. */
+  --action-fill: #000000;
+  --action-ink: #ffffff;
+
+  /* ---------------------------------------------------------------------
+   * Status scale — reserved meaning, always shipped with an icon + label.
+   * All text steps verified >= 4.5:1 on both white and their own tint.
+   * ------------------------------------------------------------------ */
+  --status-good: #15803d;
+  --status-good-tint: #f0fdf4;
+  --status-good-line: #bbf7d0;
+
+  --status-warn: #b45309;
+  --status-warn-tint: #fffbeb;
+  --status-warn-line: #fde68a;
+
+  --status-bad: #b91c1c;
+  --status-bad-tint: #fef2f2;
+  --status-bad-line: #fecaca;
+
+  --status-info: #1d4ed8;
+  --status-info-tint: #dbeafe;
+  --status-info-line: #bfdbfe;
+
+  --status-idle-tint: #f5f5f5;
+
+  /* ---------------------------------------------------------------------
+   * Typography
+   * Satoshi is display-only and unlicensed here; the documented substitute
+   * is Inter 500 with -0.02em. CJK has no glyphs in either face, so a CJK
+   * stack is declared explicitly rather than left to browser fallback.
+   * ------------------------------------------------------------------ */
+  --font-cjk: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI",
+    "Microsoft YaHei", "Noto Sans SC", "Source Han Sans SC", sans-serif;
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, var(--font-cjk);
+  --font-display: Satoshi, Inter, ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", var(--font-cjk);
+  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, SFMono-Regular,
+    Menlo, Consolas, monospace;
+
+  --text-caption: 11px;
+  --text-micro: 12px;
+  --text-body: 14px;
+  --text-body-lg: 16px;
+  --text-body-xl: 18px;
+  --text-subheading: 20px;
+  --text-heading-sm: 24px;
+  --text-heading: 30px;
+  --text-heading-lg: 36px;
+  --text-display: 48px;
+
+  --leading-tight: 1.2;
+  --leading-snug: 1.35;
+  --leading-body: 1.5;
+  --leading-relaxed: 1.7;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* Negative tracking is applied to Latin/numerals only. Applied to CJK it
+   * crushes the glyph rhythm, so display headings that carry Chinese use the
+   * softer step. */
+  --tracking-latin: -0.02em;
+  --tracking-display: -0.01em;
+  --tracking-label: 0.06em;
+
+  /* ---------------------------------------------------------------------
+   * Space — 4px base, compact density
+   * ------------------------------------------------------------------ */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 28px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-14: 56px;
+  --sp-16: 64px;
+  --sp-20: 80px;
+  --sp-24: 96px;
+
+  /* App screens are dense. */
+  --gap-section: 32px;
+
+  --page-max: 1200px;
+  --sidebar-w: 248px;
+  --topbar-h: 64px;
+
+  /* ---------------------------------------------------------------------
+   * Radius — pills 9999, cards 12, large cards 16, buttons 8, inputs 6.
+   * Nothing outside this vocabulary.
+   * ------------------------------------------------------------------ */
+  --r-input: 6px;
+  --r-button: 8px;
+  --r-card: 12px;
+  --r-card-lg: 16px;
+  --r-pill: 9999px;
+
+  /* ---------------------------------------------------------------------
+   * Elevation — borders carry structure. Shadows are rare and small.
+   * ------------------------------------------------------------------ */
+  --shadow-md: rgba(0, 0, 0, 0.1) 0 10px 15px -3px,
+    rgba(0, 0, 0, 0.1) 0 4px 6px -4px;
+  --focus-ring: 0 0 0 2px var(--canvas), 0 0 0 4px var(--accent);
+
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur: 140ms;
+}

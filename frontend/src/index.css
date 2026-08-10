@@ -1,0 +1,82 @@
+/*
+ * Tailwind entry.
+ *
+ * Layer discipline: our hand-written stylesheets are imported INTO cascade
+ * layers so Tailwind utilities (a later layer) can still override them.
+ * Unlayered CSS would otherwise beat every utility class.
+ *
+ * Token direction: shadcn's semantic names point AT our validated palette,
+ * never the other way round. The evidence ramp and status scale were checked
+ * against contrast and CVD gates; shadcn's defaults were not.
+ */
+
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@import "./styles/tokens.css";
+@import "./styles/base.css" layer(base);
+@import "./styles/layout.css" layer(components);
+@import "./styles/components.css" layer(components);
+@import "./styles/radix.css" layer(components);
+@import "./styles/views.css" layer(components);
+
+@theme inline {
+  /* Surfaces & text */
+  --color-background: var(--canvas);
+  --color-foreground: var(--ink);
+  --color-card: var(--canvas);
+  --color-card-foreground: var(--ink);
+  --color-popover: var(--canvas);
+  --color-popover-foreground: var(--ink);
+
+  /* The committed action — high-contrast neutral fill */
+  --color-primary: var(--action-fill);
+  --color-primary-foreground: var(--action-ink);
+
+  --color-secondary: var(--paper-strong);
+  --color-secondary-foreground: var(--ink);
+  --color-muted: var(--paper);
+  --color-muted-foreground: var(--ink-faint);
+
+  /* shadcn uses `accent` for hover fills, not for the brand highlight */
+  --color-accent: var(--accent-tint);
+  --color-accent-foreground: var(--accent-deep);
+
+  --color-destructive: var(--status-bad);
+  --color-destructive-foreground: var(--action-ink);
+
+  --color-border: var(--line);
+  --color-input: var(--line-strong);
+  --color-ring: var(--accent);
+
+  /* Product scales exposed as utilities */
+  --color-brand: var(--accent);
+  --color-brand-deep: var(--accent-deep);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-line-strong: var(--line-strong);
+  --color-line-heavy: var(--line-heavy);
+  --color-paper: var(--paper);
+
+  --color-good: var(--status-good);
+  --color-good-tint: var(--status-good-tint);
+  --color-warn: var(--status-warn);
+  --color-warn-tint: var(--status-warn-tint);
+  --color-bad: var(--status-bad);
+  --color-bad-tint: var(--status-bad-tint);
+  --color-info: var(--status-info);
+  --color-info-tint: var(--status-info-tint);
+
+
+  /* Radius vocabulary — nothing outside these steps */
+  --radius-sm: var(--r-input);
+  --radius-md: var(--r-button);
+  --radius-lg: var(--r-card);
+  --radius-xl: var(--r-card-lg);
+
+  /* Type stacks, including the CJK fallbacks Inter cannot cover */
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-display: var(--font-display);
+}
