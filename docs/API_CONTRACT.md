@@ -1,14 +1,12 @@
-# 后端 API 草案
+# 后端 API 契约
 
-前端当前使用模拟数据。后端实现时建议从以下版本化边界开始，所有写操作要求 CSRF 防护、速率限制和审计事件。
+API 统一挂载在 `/api/v1`。公开读取带版本元数据与缓存策略；带凭据写入使用同源 JSON、严格 CORS、速率限制、短期签名 quote 和能力令牌。前端在公开数据库为空时保留显式模拟数据回退。
 
 ## 公开读取
 
 - `GET /api/v1/dashboard`
 - `GET /api/v1/providers/{slug}`
 - `GET /api/v1/registry?status=stable|beta`
-- `GET /api/v1/registry/{id}`
-- `GET /api/v1/transparency/events`
 
 响应必须包含 `generated_at`、`data_version`、`method_version` 和缓存策略。公开证据需要服务端脱敏。
 
@@ -32,13 +30,11 @@
 
 创建成功只返回凭据指纹尾部和一次性撤销令牌。撤销令牌只存 hash。
 
+当前实现只接收 `kind=api`；代理和商家通道仍走人工流程。API key 存入 AES-256-GCM 临时信封，捐赠业务记录只有信封句柄和 HMAC 指纹尾部。新记录固定为 `quarantined`，撤销或到期即删除信封。
+
 ## Registry 与审核
 
 - `POST /api/v1/registry/proposals`
 - `GET /api/v1/registry/proposals/{id}`
-- `POST /api/v1/registry/proposals/{id}/reviews`
-- `POST /api/v1/registry/proposals/{id}/replications`
-- `POST /api/v1/registry/proposals/{id}/promote`
-- `POST /api/v1/registry/versions/{id}/revoke`
 
-所有状态迁移由服务端权限和状态机校验，客户端提交的角色、评级或签名状态不可直接信任。
+提案由服务端校验字段、探针状态和 Legacy prompt 锁定规则，计算内容 hash，固定保存为 `gitops_pending` 并返回预填 GitHub issue。API 不接受客户端提交的角色、评级、审核或签名状态；review、replication、promote 和 revoke 将在 OIDC 与多人签名边界完成后另行开放。

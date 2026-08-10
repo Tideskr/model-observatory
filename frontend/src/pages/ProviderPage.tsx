@@ -1,7 +1,7 @@
 import { ArrowLeft, FileSearch } from 'lucide-react'
 import { useMemo } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
-import { providers, providerKindLabel, sourceLabel } from '../data'
+import { providerKindLabel, sourceLabel } from '../data'
 import type { SourceKind } from '../data'
 import { providerHeadline } from '../confidence'
 import { meterTone } from '../scales'
@@ -16,25 +16,39 @@ import {
   SourceCard,
   WeakestLinkWarning,
 } from '../components/ui'
+import { usePublicData } from '../api/publicData'
 
 const sources: SourceKind[] = ['community', 'donated', 'vendor']
 
 export function ProviderPage() {
   const { slug } = useParams()
+  const { providers } = usePublicData()
   const [params, setParams] = useSearchParams()
 
-  const provider = providers.find((item) => item.slug === slug) ?? providers[0]
-  const headline = providerHeadline(provider)
-  const checked = useRelativeTime(new Date(provider.lastCheckedAt))
-
-  const selected = (params.get('source') as SourceKind | null) ?? 'community'
+  const provider = providers.find((item) => item.slug === slug)
+  const checked = useRelativeTime(new Date(provider?.lastCheckedAt ?? 0))
+  const requestedSource = params.get('source') as SourceKind | null
+  const selected = requestedSource && sources.includes(requestedSource) ? requestedSource : 'community'
   const records = useMemo(
     () =>
-      provider.anomalies
-        .filter((record) => record.source === selected)
-        .sort((a, b) => b.at.localeCompare(a.at)),
+      provider
+        ? provider.anomalies
+            .filter((record) => record.source === selected)
+            .toSorted((a, b) => b.at.localeCompare(a.at))
+        : [],
     [provider, selected],
   )
+  if (!provider) {
+    return (
+      <div className="stack">
+        <Link className="back-link" to="/">
+          <ArrowLeft size={16} /> 返回观测面板
+        </Link>
+        <EmptyState icon={<FileSearch size={22} />} title="未找到该提供商" />
+      </div>
+    )
+  }
+  const headline = providerHeadline(provider)
 
   function selectSource(source: SourceKind) {
     const next = new URLSearchParams(params)

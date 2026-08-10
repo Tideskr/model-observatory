@@ -2,6 +2,7 @@ import { BookOpen, Database, FlaskConical, HeartHandshake, LayoutDashboard, Menu
 import type { LucideIcon } from 'lucide-react'
 import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router'
+import { usePublicData } from '../api/publicData'
 
 interface NavItem {
   to: string
@@ -32,6 +33,7 @@ function usePageLabel() {
 export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const pageLabel = usePageLabel()
+  const publicData = usePublicData()
 
   return (
     <div className="shell">
@@ -71,8 +73,8 @@ export function AppShell() {
 
         <div className="sidebar-foot">
           <div className="sidebar-status">
-            <small>数据版本 demo-2026.08</small>
-            <small>当前全部为模拟数据</small>
+            <small>数据版本 {publicData.dataVersion}</small>
+            <small>{publicData.mode === 'live' ? `方法 ${publicData.methodVersion}` : '当前显示模拟数据'}</small>
           </div>
         </div>
       </aside>
@@ -99,9 +101,9 @@ export function AppShell() {
             Model Observatory <span aria-hidden="true">/</span> <strong>{pageLabel}</strong>
           </span>
           <div className="topbar-meta">
-            <span className="pill pill-warn pill-sm">
+            <span className={`pill ${publicData.mode === 'live' ? 'pill-good' : 'pill-warn'} pill-sm`}>
               <span className="dot" aria-hidden="true" />
-              原型数据
+              {publicData.mode === 'live' ? '观测数据' : publicData.mode === 'loading' ? '连接中' : '原型数据'}
             </span>
           </div>
         </header>

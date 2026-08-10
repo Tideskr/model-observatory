@@ -1,7 +1,7 @@
 import { ChevronRight, ShieldAlert } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
-import { providers, providerKindLabel } from '../data'
+import { providerKindLabel } from '../data'
 import type { Provider } from '../data'
 import { byRisk, providerHeadline, weakestLink } from '../confidence'
 import { meterTone } from '../scales'
@@ -14,6 +14,7 @@ import {
   Sparkline,
   WeakestLinkWarning,
 } from '../components/ui'
+import { usePublicData } from '../api/publicData'
 
 const sortOptions = [
   { value: 'risk', label: '风险优先' },
@@ -55,6 +56,7 @@ function ProviderBlock({ provider }: { provider: Provider }) {
 
 export function DashboardPage() {
   const [sort, setSort] = useState('risk')
+  const { providers } = usePublicData()
 
   const visible = useMemo(() => {
     const rows = [...providers]
@@ -65,7 +67,7 @@ export function DashboardPage() {
       return rows.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans'))
     }
     return rows.sort(byRisk)
-  }, [sort])
+  }, [providers, sort])
 
   const flagged = providers.filter((provider) => weakestLink(provider) != null)
 

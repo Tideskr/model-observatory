@@ -1,0 +1,93 @@
+import { randomBytes } from 'node:crypto'
+
+export type AppEnvironment = 'development' | 'test' | 'production'
+
+export interface AppConfig {
+  appEnv: AppEnvironment
+  host: string
+  port: number
+  publicOrigin: string
+  databaseUrl: string
+  logLevel: string
+  enableApiDocs: boolean
+  tokenPepper: string
+  quoteSigningSecret: string
+  credentialMasterKey: Buffer
+  quoteTtlSeconds: number
+  runRetentionHours: number
+  maxRunRequests: number
+  scoringReleaseId: string
+  repositoryUrl: string
+}
+
+function parseEnvironment(value: string | undefined): AppEnvironment {
+  if (value === 'production' || value === 'test') return value
+  return 'development'
+}
+
+function parsePort(value: string | undefined): number {
+  const port = Number(value ?? 8787)
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error('PORT must be an integer between 1 and 65535')
+  }
+  return port
+}
+
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (value == null) return fallback
+  return value === 'true' || value === '1'
+}
+
+function secret(value: string | undefined, name: string, environment: AppEnvironment): string {
+  if (value && value.length >= 32) return value
+  if (environment === 'production') throw new Error(`${name} must contain at least 32 characters`)
+  return randomBytes(32).toString('base64url')
+}
+
+function masterKey(value: string | undefined, environment: AppEnvironment): Buffer {
+  if (value) {
+    const decoded = Buffer.from(value, 'base64')
+    if (decoded.length === 32) return decoded
+  }
+  if (environment === 'production') {
+    throw new Error('CREDENTIAL_MASTER_KEY must be a base64-encoded 32-byte value')
+  }
+  return randomBytes(32)
+}
+
+function repositoryUrl(value: string | undefined): string {
+  const url = new URL(value ?? 'https://github.com/OWNER/REPO')
+  if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.username || url.password || url.search || url.hash) {
+    throw new Error('REPOSITORY_URL must be an HTTPS github.com repository URL')
+  }
+  const parts = url.pathname.split('/').filter(Boolean)
+  if (parts.length !== 2) throw new Error('REPOSITORY_URL must identify one GitHub owner and repository')
+  return `${url.origin}/${parts.join('/')}`
+}
+
+export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
+  const appEnv = parseEnvironment(environment['APP_ENV'] ?? environment['NODE_ENV'])
+  const publicOrigin = environment['PUBLIC_ORIGIN'] ?? 'http://localhost:5173'
+  const origin = new URL(publicOrigin)
+  if (!['http:', 'https:'].includes(origin.protocol)) {
+    throw new Error('PUBLIC_ORIGIN must use http or https')
+  }
+
+  return {
+    appEnv,
+    host: environment['HOST'] ?? '127.0.0.1',
+    port: parsePort(environment['PORT']),
+    publicOrigin: origin.origin,
+    databaseUrl: environment['DATABASE_URL'] ?? 'memory:',
+    logLevel: environment['LOG_LEVEL'] ?? 'info',
+    enableApiDocs: parseBoolean(environment['ENABLE_API_DOCS'], appEnv !== 'production'),
+    tokenPepper: secret(environment['TOKEN_PEPPER'], 'TOKEN_PEPPER', appEnv),
+    quoteSigningSecret: secret(environment['QUOTE_SIGNING_SECRET'], 'QUOTE_SIGNING_SECRET', appEnv),
+    credentialMasterKey: masterKey(environment['CREDENTIAL_MASTER_KEY'], appEnv),
+    quoteTtlSeconds: 10 * 60,
+    runRetentionHours: 24,
+    maxRunRequests: 500,
+    scoringReleaseId: environment['SCORING_RELEASE_ID'] ?? 'stage-c-trusted-likelihood-v2',
+    repositoryUrl: repositoryUrl(environment['REPOSITORY_URL']),
+  }
+}

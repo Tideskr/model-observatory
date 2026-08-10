@@ -1,5 +1,5 @@
 import { ExternalLink, Lock, PencilLine, Shuffle } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { PROBE_ISSUE_TEMPLATE, REPO_URL } from '../config'
 import {
@@ -9,6 +9,8 @@ import {
   probes,
 } from '../probes'
 import type { ProbeDefinition } from '../probes'
+import { fetchRegistry } from '../api/publicData'
+import { createRegistryProposal } from '../api/contributions'
 import { FormSelect } from '../components/Fields'
 import { PageHeader, Pill } from '../components/ui'
 import {
@@ -97,6 +99,43 @@ function EditDialog({ probe }: { probe: ProbeDefinition }) {
   const [field, setField] = useState(editableFields[0].value)
   const [proposed, setProposed] = useState('')
   const [reason, setReason] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const currentValue = field === 'expectedAnswer'
+    ? probe.expectedAnswer ?? ''
+    : field === 'promptTemplate'
+      ? probe.promptTemplate
+      : field === 'scoringNote'
+        ? probe.scoringNote ?? ''
+        : probe.label
+  const apiField = field === 'expectedAnswer'
+    ? 'expected_answer' as const
+    : field === 'promptTemplate'
+      ? 'prompt_template' as const
+      : field === 'scoringNote'
+        ? 'scoring_note' as const
+        : 'label' as const
+
+  async function submitProposal() {
+    const fallback = buildIssueUrl(probe, field, proposed, reason)
+    const popup = window.open('about:blank', '_blank')
+    if (popup) popup.opener = null
+    setSubmitting(true)
+    try {
+      const created = await createRegistryProposal({
+        probeId: probe.id, field: apiField, currentValue, proposedValue: proposed, reason,
+      })
+      if (popup) popup.location.href = created.issue_url
+      else window.location.href = created.issue_url
+      toast.info('提案已登记，正在打开 GitHub issue')
+    } catch {
+      if (popup) popup.location.href = fallback
+      else window.location.href = fallback
+      toast.warning('后端不可用，已改用未登记的 GitHub issue 草稿')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   return (
     <Dialog>
@@ -139,15 +178,14 @@ function EditDialog({ probe }: { probe: ProbeDefinition }) {
         </div>
 
         <DialogFooter>
-          <a
+          <button
+            type="button"
             className="btn btn-primary"
-            href={buildIssueUrl(probe, field, proposed, reason)}
-            target="_blank"
-            rel="noreferrer"
-            onClick={() => toast.info('已打开 GitHub issue 草稿')}
+            disabled={!proposed.trim() || reason.trim().length < 20 || submitting}
+            onClick={() => void submitProposal()}
           >
-            <ExternalLink size={15} /> 打开 GitHub issue
-          </a>
+            <ExternalLink size={15} /> {submitting ? '登记中…' : '登记并打开 issue'}
+          </button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -155,10 +193,32 @@ function EditDialog({ probe }: { probe: ProbeDefinition }) {
 }
 
 export function RegistryPage() {
+  const [visibleProbes, setVisibleProbes] = useState(probes)
   const [selectedId, setSelectedId] = useState(probes[0].id)
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchRegistry(controller.signal)
+      .then((response) => {
+        if (!response.items.length) return
+        const updated = response.items.flatMap((item) => {
+          const existing = probes.find((probe) => probe.id === item.id)
+          if (!existing) return []
+          return [{
+            ...existing,
+            category: item.category,
+            promptTemplate: item.prompt_template,
+            ...(item.developer_message ? { developerMessage: item.developer_message } : {}),
+            promptPinned: !item.prompt_rewrite_allowed,
+          }]
+        })
+        if (updated.length) setVisibleProbes(updated)
+      })
+      .catch(() => {})
+    return () => controller.abort()
+  }, [])
   const selected = useMemo(
-    () => probes.find((probe) => probe.id === selectedId) ?? probes[0],
-    [selectedId],
+    () => visibleProbes.find((probe) => probe.id === selectedId) ?? visibleProbes[0],
+    [selectedId, visibleProbes],
   )
 
   return (
@@ -171,7 +231,7 @@ export function RegistryPage() {
       <div className="registry-layout">
         <section className="card">
           <ul className="probe-list">
-            {probes.map((probe) => (
+            {visibleProbes.map((probe) => (
               <li key={probe.id}>
                 <button
                   type="button"

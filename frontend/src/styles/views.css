@@ -596,6 +596,15 @@
   font-size: var(--text-body);
 }
 
+.detected-row > :not(.t-label) {
+  min-width: 0;
+}
+
+.detected-row code {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
 .risk-block {
   display: flex;
   gap: var(--sp-3);

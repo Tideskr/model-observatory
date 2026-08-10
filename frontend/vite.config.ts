@@ -12,6 +12,9 @@ export default defineConfig({
     },
   },
   server: {
+    proxy: {
+      '/api': 'http://127.0.0.1:8787',
+    },
     fs: {
       // The docs page renders ../docs/*.md, which sits outside the Vite root.
       allow: ['..'],

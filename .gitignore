@@ -1,7 +1,13 @@
-# Archived snapshot of the original detector — excluded from this repository.
-# Its licensing is unresolved (see README), and it contains a captured raw
-# HTTP request from a real client.
-Legacy/
+# The archived detector remains excluded because it contains a captured raw
+# HTTP request. The two scoring baselines below are included with the original
+# author's permission and are the only Legacy files required by the backend.
+Legacy/*
+!Legacy/gpt56_vnext/
+Legacy/gpt56_vnext/*
+!Legacy/gpt56_vnext/baselines/
+Legacy/gpt56_vnext/baselines/*
+!Legacy/gpt56_vnext/baselines/runtime_catalog.json
+!Legacy/gpt56_vnext/baselines/trusted_likelihood_v2.json
 
 # Local tool settings
 .claude/settings.local.json
@@ -10,6 +16,11 @@ Legacy/
 node_modules
 dist
 dist-ssr
+coverage
+
+# Backend runtime state and local secrets
+backend/.env
+backend/.data/
 
 # Logs
 logs

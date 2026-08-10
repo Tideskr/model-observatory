@@ -2,10 +2,11 @@ import { Check, CloudCog, Eye, EyeOff, KeyRound, Mail, Network, ShieldAlert } fr
 import { useMemo, useState } from 'react'
 import { RadioGroup } from 'radix-ui'
 import { toast } from 'sonner'
+import { submitApiDonation, type DonationReceipt } from '../api/contributions'
 import { providers, providerKindLabel } from '../data'
 import { presets, estimateRun } from '../probes'
 import { DEFAULT_PRICE, estimateCost, formatUsd } from '../pricing'
-import { FormSelect } from '../components/Fields'
+import { CheckField, FormSelect } from '../components/Fields'
 import { PageHeader, Pill } from '../components/ui'
 
 type DonationKind = 'proxy' | 'api' | 'vendor'
@@ -57,6 +58,26 @@ export function DonatePage() {
   const [quota, setQuota] = useState(10)
   const [interval, setInterval] = useState(240)
   const [multiplier, setMultiplier] = useState(0.2)
+  const [consent, setConsent] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [receipt, setReceipt] = useState<DonationReceipt | null>(null)
+
+  async function submitDonation() {
+    setSubmitting(true)
+    try {
+      const created = await submitApiDonation({
+        baseUrl: baseUrl.trim(), apiKey, quotaUsd: quota, intervalMinutes: interval,
+      })
+      setApiKey('')
+      setConsent(false)
+      setReceipt(created)
+      toast.success('凭据已进入隔离区')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '提交失败')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   /* The donor should not have to say which vendor or price group their key
      belongs to — it is inferable from the endpoint, and asking invites errors. */
@@ -235,16 +256,31 @@ export function DonatePage() {
               )}
             </div>
 
+            <CheckField checked={consent} onCheckedChange={setConsent}>
+              我同意服务端在所列额度和频率内使用该凭据；凭据将加密保存，并可使用一次性撤销令牌撤销。
+            </CheckField>
+
+            {receipt && (
+              <div className="detected-row" role="status">
+                <span className="t-label">撤销令牌</span>
+                <span>
+                  <code>{receipt.revocation_token}</code>
+                  <br />
+                  <span className="t-faint">捐赠 {receipt.donation_id} · 隔离中 · 指纹尾部 {receipt.credential_fingerprint_tail}</span>
+                </span>
+              </div>
+            )}
+
             <div className="form-actions">
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={!baseUrl.trim() || !apiKey.trim()}
-                onClick={() => toast.success('已记录 API 捐赠意向（本地原型）')}
+                disabled={!baseUrl.trim() || !apiKey.trim() || !consent || submitting}
+                onClick={() => void submitDonation()}
               >
-                提交凭据
+                {submitting ? '提交中…' : '提交凭据'}
               </button>
-              <span>原型不会发送或保存输入内容</span>
+              <span>成功后只显示一次撤销令牌</span>
             </div>
           </section>
 
