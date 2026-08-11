@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "providers": [
+    {
+      "slug": "congee-pro",
+      "name": "粥 Pro",
+      "kind": "relay",
+      "domains": [
+        {
+          "hostname": "congee.pro",
+          "role": "primary",
+          "default_base_path": "/v1",
+          "status": "active"
+        }
+      ]
+    },
+    {
+      "slug": "shuai-api",
+      "name": "帅 API",
+      "kind": "relay",
+      "domains": [
+        {
+          "hostname": "api.shuaiapi.com",
+          "role": "primary",
+          "default_base_path": "/v1",
+          "status": "active"
+        },
+        {
+          "hostname": "oai.sb",
+          "role": "alias",
+          "default_base_path": "/v1",
+          "status": "active"
+        },
+        {
+          "hostname": "api.oai.sb",
+          "role": "alias",
+          "default_base_path": "/v1",
+          "status": "active"
+        },
+        {
+          "hostname": "cdn.shuaiapi.com",
+          "role": "alias",
+          "default_base_path": "/v1",
+          "status": "active"
+        }
+      ]
+    },
+    {
+      "slug": "ai-hub",
+      "name": "AI Hub",
+      "kind": "relay",
+      "domains": [
+        {
+          "hostname": "aihub.dog",
+          "role": "primary",
+          "default_base_path": "/v1",
+          "status": "active"
+        },
+        {
+          "hostname": "aihub.top",
+          "role": "alias",
+          "default_base_path": "/v1",
+          "status": "active"
+        },
+        {
+          "hostname": "api.aihub.top",
+          "role": "alias",
+          "default_base_path": "/v1",
+          "status": "active"
+        }
+      ]
+    },
+    {
+      "slug": "xingchen",
+      "name": "君の星辰",
+      "kind": "relay",
+      "domains": [
+        {
+          "hostname": "ai.centos.hk",
+          "role": "primary",
+          "default_base_path": "/v1",
+          "status": "active"
+        },
+        {
+          "hostname": "api.centos.hk",
+          "role": "alias",
+          "default_base_path": "/v1",
+          "status": "active"
+        },
+        {
+          "hostname": "frapi.centos.hk",
+          "role": "alias",
+          "default_base_path": "/v1",
+          "status": "active"
+        }
+      ]
+    },
+    {
+      "slug": "true-sota",
+      "name": "True SOTA",
+      "kind": "relay",
+      "domains": [
+        {
+          "hostname": "true-sota.com",
+          "role": "primary",
+          "default_base_path": "/v1",
+          "status": "active"
+        }
+      ]
+    },
+    {
+      "slug": "gate-ai",
+      "name": "Gate AI",
+      "kind": "relay",
+      "domains": [
+        {
+          "hostname": "gateai.cc",
+          "role": "primary",
+          "default_base_path": "/v1",
+          "status": "active"
+        }
+      ]
+    },
+    {
+      "slug": "4-router",
+      "name": "4 Router",
+      "kind": "relay",
+      "domains": [
+        {
+          "hostname": "4router.net",
+          "role": "primary",
+          "default_base_path": "/v1",
+          "status": "active"
+        }
+      ]
+    }
+  ]
+}
