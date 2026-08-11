@@ -12,7 +12,20 @@
       "group_detection": {
         "probe_model": "__api_authenticator_group_probe__"
       },
-      "groups": [],
+      "groups": [
+        {
+          "id": "default",
+          "name": "默认",
+          "aliases": [
+            "默认分组"
+          ],
+          "multiplier": 0.2,
+          "models": [
+            "gpt-5.6-sol",
+            "gpt-5.6-terra"
+          ]
+        }
+      ],
       "domains": [
         {
           "hostname": "congee.pro",
