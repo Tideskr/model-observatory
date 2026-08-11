@@ -2,8 +2,9 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { test } from 'node:test'
 import { buildRunJobs } from '../src/executor/job-plan.js'
+import { empiricalFingerprintReliability } from '../src/scoring/fingerprint-reliability.js'
 import { defaultScoringReleaseManifest, importScoringRelease } from '../src/scoring/release-import.js'
-import { scoreRun, type RawObservation } from '../src/scoring/score.js'
+import { scoreRun, scoreStoredRun, type RawObservation } from '../src/scoring/score.js'
 import type { RunRecord } from '../src/store/run-store.js'
 
 test('medium preset uses the exact v3 runtime contract and produces a formal fingerprint result', async () => {
@@ -56,7 +57,43 @@ test('medium preset uses the exact v3 runtime contract and produces a formal fin
   assert.equal(probability['formal_eligible'], true)
   assert.equal(probability['winner'], 'gpt-5.6-sol')
   assert.equal(probability['probability_pass'], true)
+  const reliability = probability['empirical_reliability'] as Record<string, unknown>
+  assert.equal(reliability['calibration_available'], true)
+  assert.equal(reliability['selected'], 48)
+  assert.equal(reliability['correct'], 48)
+  assert.deepEqual(reliability['wilson95_interval'], [0.9258998703338824, 0.9999999999999999])
   assert.equal(result.summary['overall_verdict'], 'Juice通过；指纹强烈指向 Sol')
+})
+
+test('fingerprint result has no winner when no weighted evidence family is available', async () => {
+  const seed = await importScoringRelease(defaultScoringReleaseManifest())
+  const run = {
+    id: randomUUID(), quoteId: randomUUID(), requestDigest: '0'.repeat(64), status: 'running',
+    targetOrigin: 'https://api.example.com', targetBaseUrl: 'https://api.example.com/v1', targetHostname: 'api.example.com',
+    model: 'gpt-5.6-sol',
+    config: {
+      probes: [{ probe_id: 'rand_country', requests: 20 }, { probe_id: 'b80_letter_count', requests: 10 }],
+      formats: ['normal'], contexts: ['no_history'], workers: 1, retries: 0,
+    },
+    disclosureVersion: 'remote-normal-v1', scoringReleaseId: seed.id, ownerTokenHash: '1'.repeat(64),
+    idempotencyKey: 'no-fingerprint-evidence', credentialHandle: randomUUID(), createdAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 60_000).toISOString(), leaseVersion: 0,
+  } as RunRecord
+  const result = scoreStoredRun(run, [], seed)
+  const probability = result.summary['probability'] as Record<string, unknown>
+  const reliability = probability['empirical_reliability'] as Record<string, unknown>
+  assert.equal(probability['winner'], null)
+  assert.equal(probability['fingerprint_model'], null)
+  assert.equal(probability['fingerprint_status'], 'unclear')
+  assert.equal(reliability['calibration_available'], false)
+  assert.equal(reliability['unavailable_reason'], 'fingerprint_not_strong')
+})
+
+test('high-tier Terra remains explicitly uncalibrated', async () => {
+  const seed = await importScoringRelease(defaultScoringReleaseManifest())
+  const reliability = empiricalFingerprintReliability(seed, 'high', 'gpt-5.6-terra', true)
+  assert.equal(reliability['calibration_available'], false)
+  assert.equal(reliability['unavailable_reason'], 'calibration_not_available')
 })
 
 test('verdict selection follows the imported release rule set', async () => {

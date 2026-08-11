@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 
-RELEASE_NAME = "gpt56-v3"
+RELEASE_NAME = "gpt56-v4"
 
 
 def release_root() -> Path:
@@ -38,7 +38,7 @@ def load_release_manifest() -> dict[str, Any]:
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     if manifest.get("schema_version") != 1:
         raise ValueError("unsupported scoring release manifest schema")
-    if manifest.get("release_id") != "stage-c-trusted-fingerprint-v3":
+    if manifest.get("release_id") != "stage-c-trusted-fingerprint-v4":
         raise ValueError("unexpected scoring release id")
     for name, item in (manifest.get("artifacts") or {}).items():
         path = root / str(item.get("file") or "")

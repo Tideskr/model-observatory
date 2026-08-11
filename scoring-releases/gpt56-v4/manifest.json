@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "release_id": "stage-c-trusted-fingerprint-v4",
+  "scoring_version": "trusted-fingerprint-v3",
+  "artifacts": {
+    "runtime_catalog": {
+      "file": "runtime_catalog.json",
+      "sha256": "8cf89f903d467cc5fb0c461ec5154347fcb59e5aac6b036e79cf9bdd8b204eb8"
+    },
+    "fingerprint_baseline": {
+      "file": "trusted_fingerprint_v3.json",
+      "sha256": "b637fcf4d959389b14779a32c6b40dd8346501d84ad7b873c928a8783e421fe5",
+      "content_sha256": "f4df50f1601c7ac4a81635c24032756a235f5c7cb2695d046cee30d2b482ed90"
+    },
+    "fingerprint_calibration": {
+      "file": "fingerprint_calibration.json",
+      "sha256": "12516ea314d73ff56296e0c627f82c294e04fd923e162524c1eff0ad39d0bb40",
+      "baseline_content_sha256": "f4df50f1601c7ac4a81635c24032756a235f5c7cb2695d046cee30d2b482ed90"
+    },
+    "conformance": {
+      "file": "conformance.json",
+      "sha256": "a69dee141e55198294b83e51b69c29120fcdf32be5d7927e02a3fb97f449ac09"
+    }
+  },
+  "models": {
+    "target": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+    "legacy": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]
+  },
+  "signatures": {
+    "gpt-5.6-sol": {
+      "low": {"value": "8", "match_rule": "exact_or_decimal_or_long_prefix"},
+      "medium": {"value": "16", "match_rule": "exact_or_decimal_or_long_prefix"},
+      "high": {"value": "40", "match_rule": "exact_or_decimal_or_long_prefix"},
+      "xhigh": {"value": "128", "match_rule": "exact"},
+      "max": {"value": "960", "match_rule": "exact"}
+    },
+    "gpt-5.6-terra": {
+      "low": {"value": "12", "match_rule": "exact"},
+      "medium": {"value": "16", "match_rule": "exact"},
+      "high": {"value": "32", "match_rule": "exact"},
+      "xhigh": {"value": "84", "match_rule": "exact"},
+      "max": {"value": "960", "match_rule": "exact"}
+    },
+    "gpt-5.6-luna": {
+      "low": {"value": "8", "match_rule": "exact"},
+      "medium": {"value": "16", "match_rule": "exact"},
+      "high": {"value": "48", "match_rule": "exact"},
+      "xhigh": {"value": "128", "match_rule": "exact"},
+      "max": {"value": "768", "match_rule": "exact"}
+    },
+    "gpt-5.5": {
+      "low": {"value": "12", "match_rule": "exact"},
+      "medium": {"value": "24", "match_rule": "exact"},
+      "high": {"value": "96", "match_rule": "exact"},
+      "xhigh": {"value": "768", "match_rule": "exact"}
+    },
+    "gpt-5.4": {
+      "low": {"value": "12", "match_rule": "exact"},
+      "medium": {"value": "20", "match_rule": "exact"},
+      "high": {"value": "96", "match_rule": "exact"},
+      "xhigh": {"value": "512", "match_rule": "exact"}
+    },
+    "gpt-5.4-mini": {
+      "low": {"value": "8", "match_rule": "exact"},
+      "medium": {"value": "24", "match_rule": "exact"},
+      "high": {"value": "64", "match_rule": "exact"},
+      "xhigh": {"value": "768", "match_rule": "exact"}
+    }
+  },
+  "formal_thresholds": {
+    "medium": {"gpt-5.6-sol": 0.7, "gpt-5.6-terra": 0.75, "gpt-5.6-luna": 0.9},
+    "high": {"gpt-5.6-sol": 0.95, "gpt-5.6-terra": 0.9, "gpt-5.6-luna": 0.9}
+  },
+  "verdict_rules": [
+    {"priority": 10, "rule_id": "all_juice_unsuccessful", "title": "可能非GPT", "predicate_id": "juice_all_unsuccessful", "severe": true},
+    {"priority": 20, "rule_id": "deterministic_anomaly", "title": "Juice混用", "predicate_id": "juice_mixed_or_deterministic_anomaly", "severe": true},
+    {"priority": 30, "rule_id": "juice_incomplete", "title": null, "predicate_id": "juice_not_passed", "severe": false},
+    {"priority": 40, "rule_id": "probability_alert", "title": "仅概率探针混用", "predicate_id": "juice_pass_and_probability_alert", "severe": true},
+    {"priority": 50, "rule_id": "pass", "title": "通过", "predicate_id": "juice_pass_and_probability_pass_or_disabled", "severe": false},
+    {"priority": 60, "rule_id": "probability_insufficient", "title": "Juice通过但概率探针证据不足", "predicate_id": "fallback", "severe": false}
+  ]
+}

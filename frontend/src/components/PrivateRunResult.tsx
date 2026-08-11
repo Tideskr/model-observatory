@@ -48,6 +48,12 @@ function boolText(value: unknown): string {
   return value === true ? '是' : value === false ? '否' : '—'
 }
 
+function fingerprintStatusText(value: unknown): string {
+  if (value === 'strong_match') return '强匹配'
+  if (value === 'unclear') return '证据不明确'
+  return text(value)
+}
+
 function statusTone(status: PrivateRunStatus): 'good' | 'warn' | 'bad' | 'info' {
   if (status === 'completed') return 'good'
   if (['failed', 'timed_out'].includes(status)) return 'bad'
@@ -103,6 +109,7 @@ export function PrivateRunResult({ report }: { report: PrivateRunReport }) {
   const coverage = record(summary['coverage'] ?? summary['coverage_summary'])
   const probability = record(summary['probability'])
   const fingerprint = record(summary['fingerprint_summary'])
+  const reliability = record(probability['empirical_reliability'] ?? fingerprint['empirical_reliability'])
   const profiles = record(summary['profile_summary'])
   const perEffort = record(juice['per_effort'])
   const errorSummary = Array.isArray(summary['error_summary']) ? summary['error_summary'] : []
@@ -115,6 +122,13 @@ export function PrivateRunResult({ report }: { report: PrivateRunReport }) {
   const retries = number(summary['retries'], number(network['retries']))
   const verdict = text(summary['title_cn'] ?? summary['overall_verdict'], '无可用结论')
   const subtitle = text(summary['subtitle_cn'], '')
+  const fingerprintStatus = fingerprint['fingerprint_status'] ?? probability['fingerprint_status']
+  const fingerprintStrong = fingerprintStatus === 'strong_match'
+  const fingerprintModel = fingerprintStrong ? text(fingerprint['fingerprint_model'] ?? probability['fingerprint_model']) : '—'
+  const reliabilityAvailable = reliability['calibration_available'] === true
+  const reliabilitySummary = reliabilityAvailable
+    ? `${number(reliability['correct'])} / ${number(reliability['selected'])}`
+    : fingerprintStrong ? '暂无同范围校准数据' : '不适用'
 
   return (
     <div className="run-report">
@@ -189,8 +203,9 @@ export function PrivateRunResult({ report }: { report: PrivateRunReport }) {
           <div><dt>混用型号</dt><dd>{text(juice['mixed_models_observed'])}</dd></div>
           <div><dt>输出硬异常</dt><dd>{boolText(output['hard_anomaly'])}</dd></div>
           <div><dt>覆盖硬异常</dt><dd>{boolText(coverage['hard_anomaly'])}</dd></div>
-          <div><dt>指纹状态</dt><dd>{text(fingerprint['fingerprint_status'] ?? (probability['enabled'] ? '已启用' : '未启用'))}</dd></div>
-          <div><dt>指纹指向</dt><dd>{text(fingerprint['fingerprint_model'] ?? probability['winner'])}</dd></div>
+          <div><dt>指纹状态</dt><dd>{fingerprintStatusText(fingerprintStatus ?? (probability['enabled'] ? '已启用' : '未启用'))}</dd></div>
+          <div><dt>指纹指向</dt><dd>{fingerprintModel}</dd></div>
+          <div><dt>实测可靠度</dt><dd>{reliabilitySummary}</dd></div>
         </dl>
       </section>
 
@@ -219,6 +234,21 @@ export function PrivateRunResult({ report }: { report: PrivateRunReport }) {
               <div key={name}><span>{name}</span><progress max={1} value={Math.min(1, number(value))} /><b>{percent(value)}</b></div>
             ))}
           </div>
+        </section>
+      )}
+
+      {reliabilityAvailable && (
+        <section className="report-section" aria-labelledby="empirical-reliability">
+          <h3 id="empirical-reliability">实测可靠度</h3>
+          <dl className="evidence-grid">
+            <div><dt>观察精度</dt><dd>{percent(reliability['observed_precision'])}</dd></div>
+            <div><dt>判对 / 样本</dt><dd>{reliabilitySummary}</dd></div>
+            <div><dt>95% Wilson 区间</dt><dd>{percent(reliability['wilson95_lower'])} - {percent(reliability['wilson95_upper'])}</dd></div>
+            <div><dt>门禁覆盖率</dt><dd>{percent(reliability['coverage'])}</dd></div>
+            <div><dt>校准范围</dt><dd>{text(reliability['tier'])} / {text(reliability['predicted_model'])}</dd></div>
+            <div><dt>匹配门槛</dt><dd>{text(reliability['threshold_operator'])} {percent(reliability['threshold'])}</dd></div>
+            <div className="is-full"><dt>校准版本</dt><dd>{text(reliability['calibration_id'])}</dd></div>
+          </dl>
         </section>
       )}
 

@@ -8,7 +8,7 @@ import math
 from pathlib import Path
 from typing import Any, Iterable
 
-from .release import load_release_manifest
+from .release import load_release_manifest, release_file
 from .utils import canonical_json, softmax
 
 
@@ -19,6 +19,75 @@ MODELS = tuple(_RELEASE["models"]["target"])
 SMOOTHING = 0.5
 COMPLETION_RATIO = 0.90
 FORMAL_THRESHOLDS = _RELEASE["formal_thresholds"]
+
+
+def _load_fingerprint_calibration() -> dict[str, Any]:
+    artifact = json.loads(release_file("fingerprint_calibration").read_text(encoding="utf-8"))
+    if artifact.get("schema_version") != 1:
+        raise ValueError("unsupported fingerprint calibration schema")
+    baseline_sha256 = (_RELEASE.get("artifacts") or {}).get("fingerprint_baseline", {}).get("content_sha256")
+    if artifact.get("baseline_sha256") != baseline_sha256:
+        raise ValueError("fingerprint calibration baseline hash mismatch")
+    if artifact.get("threshold_operator") != ">":
+        raise ValueError("unsupported fingerprint calibration threshold operator")
+    if len(artifact.get("formal_gate_reliability") or []) != 6:
+        raise ValueError("fingerprint calibration must contain six formal gate rows")
+    return artifact
+
+
+FINGERPRINT_CALIBRATION = _load_fingerprint_calibration()
+
+
+def empirical_fingerprint_reliability(
+    *,
+    baseline_sha256: str,
+    tier: str | None,
+    predicted_model: str | None,
+    strong_match: bool,
+) -> dict[str, Any]:
+    calibration = FINGERPRINT_CALIBRATION
+    base = {
+        "calibration_available": False,
+        "calibration_id": calibration.get("calibration_id"),
+        "calibration_scope": "formal_gate",
+        "baseline_sha256": baseline_sha256,
+        "tier": tier,
+        "predicted_model": predicted_model,
+    }
+    if calibration.get("baseline_sha256") != baseline_sha256:
+        return {**base, "unavailable_reason": "calibration_baseline_mismatch"}
+    if not strong_match or predicted_model is None:
+        return {**base, "unavailable_reason": "fingerprint_not_strong"}
+    if tier is None:
+        return {**base, "unavailable_reason": "calibration_scope_unknown"}
+    row = next(
+        (
+            item for item in calibration.get("formal_gate_reliability", [])
+            if item.get("tier") == tier and item.get("predicted_model") == predicted_model
+        ),
+        None,
+    )
+    if not row or not row.get("calibration_available"):
+        return {**base, "unavailable_reason": "calibration_not_available"}
+    tier_summary = (calibration.get("tier_summaries") or {}).get(tier) or {}
+    return {
+        **base,
+        "calibration_available": True,
+        "source_replay_sha256": calibration.get("source_replay_sha256"),
+        "threshold": row.get("threshold"),
+        "threshold_operator": calibration.get("threshold_operator"),
+        "eligibility_filter": calibration.get("eligibility_filter"),
+        "selected": row.get("selected"),
+        "correct": row.get("correct"),
+        "observed_precision": row.get("observed_precision"),
+        "wilson95_lower": row.get("wilson95_lower"),
+        "wilson95_upper": row.get("wilson95_upper"),
+        "wilson95_interval": [row.get("wilson95_lower"), row.get("wilson95_upper")],
+        "coverage": tier_summary.get("coverage"),
+        "tier_total_runs": tier_summary.get("total_runs"),
+        "sample_scope": calibration.get("sample_scope"),
+        "limitations": calibration.get("limitations"),
+    }
 
 
 def _safe_log(value: float) -> float:
@@ -466,6 +535,12 @@ class ProbabilityModel:
             reasons.append("no_model_reached_strong_match_threshold")
         if len(winners) > 1:
             reasons.append("multiple_models_reached_threshold")
+        reliability = empirical_fingerprint_reliability(
+            baseline_sha256=str(self.artifact["content_sha256"]),
+            tier=str(decision_level) if decision_level is not None else None,
+            predicted_model=fingerprint_model,
+            strong_match=fingerprint_status == "strong_match",
+        )
         return {
             "schema_version": SCHEMA_VERSION,
             "scoring_version": SCORING_VERSION,
@@ -477,11 +552,13 @@ class ProbabilityModel:
             "fingerprint_status": fingerprint_status,
             "fingerprint_model": fingerprint_model,
             "fingerprint_match": matches,
+            "fingerprint_match_meaning": "relative_likelihood_not_calibrated_probability",
             "fingerprint_thresholds": thresholds,
             "fingerprint_official_eligible": official_eligible,
             "fingerprint_unclear_reasons": reasons,
-            "winner": ordered[0],
-            "runner_up": ordered[1],
+            "empirical_reliability": reliability,
+            "winner": ordered[0] if active_families else None,
+            "runner_up": ordered[1] if active_families else None,
             "scores": scores,
             "family_contributions": family_details,
             "cell_details": cells,

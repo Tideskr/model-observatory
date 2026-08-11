@@ -1,6 +1,7 @@
 import type { RunStatus } from '../contracts/common.js'
 import type { RunRecord, StoredObservation } from '../store/run-store.js'
 import type { ProbeJob } from '../executor/job-plan.js'
+import { empiricalFingerprintReliability } from './fingerprint-reliability.js'
 import type { ScoringCalibrationSeed, ScoringCellSeed, ScoringReleaseSeed, VerdictRuleSeed } from './types.js'
 
 const TARGET_MODELS = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'] as const
@@ -207,7 +208,10 @@ function probabilitySummary(run: RunRecord, rows: StoredObservation[], seed: Sco
     enabled: false,
     fingerprint_status: 'unclear',
     fingerprint_model: null,
+    winner: null,
     fingerprint_match: {},
+    fingerprint_match_meaning: 'relative_likelihood_not_calibrated_probability',
+    empirical_reliability: empiricalFingerprintReliability(seed, null, null, false),
     probability_pass: false,
     evidence_insufficient: false,
     fingerprint_unclear_reasons: ['builtin_fingerprint_not_enabled'],
@@ -256,7 +260,7 @@ function probabilitySummary(run: RunRecord, rows: StoredObservation[], seed: Sco
     ? softmax(totalScores)
     : Object.fromEntries(TARGET_MODELS.map((model) => [model, 1 / TARGET_MODELS.length]))
   const ordered = [...TARGET_MODELS].toSorted((a, b) => probabilities[b]! - probabilities[a]!)
-  const winner = ordered[0]!
+  const winner = activeFamilies > 0 ? ordered[0]! : null
   const thresholds = (calibration?.thresholds['strong_match'] ?? {}) as Record<string, number>
   const formalReady = reasons.length === 0 && activeFamilies > 0
   const winners = TARGET_MODELS.filter((model) => formalReady && probabilities[model]! > Number(thresholds[model] ?? 1))
@@ -264,6 +268,7 @@ function probabilitySummary(run: RunRecord, rows: StoredObservation[], seed: Sco
   const fingerprintModel = winners.length === 1 ? winners[0]! : null
   if (formalReady && winners.length === 0) reasons.push('no_model_reached_strong_match_threshold')
   if (winners.length > 1) reasons.push('multiple_models_reached_threshold')
+  const tier = typeof calibration?.details['decision_level'] === 'string' ? calibration.details['decision_level'] : null
   return {
     enabled: true,
     formal_eligible: formalReady,
@@ -271,9 +276,11 @@ function probabilitySummary(run: RunRecord, rows: StoredObservation[], seed: Sco
     fingerprint_status: fingerprintStatus,
     fingerprint_model: fingerprintModel,
     fingerprint_match: probabilities,
+    fingerprint_match_meaning: 'relative_likelihood_not_calibrated_probability',
     fingerprint_thresholds: thresholds,
     fingerprint_official_eligible: formalReady,
     fingerprint_unclear_reasons: [...new Set(reasons)],
+    empirical_reliability: empiricalFingerprintReliability(seed, tier, fingerprintModel, fingerprintStatus === 'strong_match'),
     conditional_relative_probability: probabilities,
     pure_scores: totalScores,
     pure_model_alert: fingerprintModel != null && fingerprintModel !== run.model,

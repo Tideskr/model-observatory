@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "juice_cases": [
+    {"claimed_model": "gpt-5.6-sol", "effort": "high", "answer": "40", "normalized_value": "40", "classification": "current_success", "mixed_models": []},
+    {"claimed_model": "gpt-5.6-sol", "effort": "high", "answer": "40.125", "normalized_value": "40.125", "classification": "current_success", "mixed_models": []},
+    {"claimed_model": "gpt-5.6-sol", "effort": "high", "answer": "48", "normalized_value": "48", "classification": "mixed", "mixed_models": ["gpt-5.6-luna"]},
+    {"claimed_model": "gpt-5.6-terra", "effort": "medium", "answer": "16", "normalized_value": "16", "classification": "current_success", "mixed_models": []},
+    {"claimed_model": "gpt-5.6-luna", "effort": "max", "answer": "768", "normalized_value": "768", "classification": "current_success", "mixed_models": []},
+    {"claimed_model": "gpt-5.6-sol", "effort": "low", "answer": "not a number", "normalized_value": null, "classification": "unsuccessful", "mixed_models": []}
+  ]
+}

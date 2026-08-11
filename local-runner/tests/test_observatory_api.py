@@ -264,7 +264,7 @@ class RunnerHttpTests(unittest.TestCase):
             body = json.load(response)
             self.assertEqual(body["service"], "model-observatory-runner")
             self.assertEqual(body["protocol_version"], "private-runs-v1")
-            self.assertEqual(body["scoring_release_id"], "stage-c-trusted-fingerprint-v3")
+            self.assertEqual(body["scoring_release_id"], "stage-c-trusted-fingerprint-v4")
             self.assertTrue(body["capabilities"]["detailed_progress"])
             self.assertEqual(response.headers["Access-Control-Allow-Origin"], "https://check.skr.moe")
             self.assertEqual(response.headers["Access-Control-Allow-Private-Network"], "true")

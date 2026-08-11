@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "calibration_id": "gpt56-v3-local-plus-20260811",
+  "generated_at": "2026-08-11T08:49:53.606815+00:00",
+  "source_replay_sha256": "d13ec718f11ea7ee49de2a626037ff108500b2de1b45434422559d73ad191b81",
+  "baseline_sha256": "f4df50f1601c7ac4a81635c24032756a235f5c7cb2695d046cee30d2b482ed90",
+  "fingerprint_match_meaning": "relative likelihood normalization among three trusted fingerprints, not a calibrated posterior probability",
+  "threshold_operator": ">",
+  "eligibility_filter": [
+    "exact_runtime_contract",
+    "candidate_samples_complete",
+    "weighted_fingerprint_family_available",
+    "exactly_one_model_above_threshold"
+  ],
+  "sample_scope": {
+    "total_runs": 113,
+    "medium_runs": 100,
+    "medium_labels": {
+      "gpt-5.6-sol": 50,
+      "gpt-5.6-terra": 25,
+      "gpt-5.6-luna": 25
+    },
+    "high_runs": 13,
+    "high_labels": {
+      "gpt-5.6-sol": 13,
+      "gpt-5.6-terra": 0,
+      "gpt-5.6-luna": 0
+    },
+    "population": "one local Plus account pool in a short observation window"
+  },
+  "tier_summaries": {
+    "medium": {
+      "total_runs": 100,
+      "strong_matches": 83,
+      "strong_matches_correct": 83,
+      "coverage": 0.83
+    },
+    "high": {
+      "total_runs": 13,
+      "strong_matches": 13,
+      "strong_matches_correct": 13,
+      "coverage": 1.0
+    }
+  },
+  "formal_gate_reliability": [
+    {
+      "tier": "medium",
+      "predicted_model": "gpt-5.6-sol",
+      "threshold": 0.7,
+      "selected": 48,
+      "correct": 48,
+      "observed_precision": 1.0,
+      "wilson95_lower": 0.9258998703338824,
+      "wilson95_upper": 0.9999999999999999,
+      "calibration_available": true
+    },
+    {
+      "tier": "medium",
+      "predicted_model": "gpt-5.6-terra",
+      "threshold": 0.75,
+      "selected": 17,
+      "correct": 17,
+      "observed_precision": 1.0,
+      "wilson95_lower": 0.8156818649911483,
+      "wilson95_upper": 1.0,
+      "calibration_available": true
+    },
+    {
+      "tier": "medium",
+      "predicted_model": "gpt-5.6-luna",
+      "threshold": 0.9,
+      "selected": 18,
+      "correct": 18,
+      "observed_precision": 1.0,
+      "wilson95_lower": 0.8241207763533425,
+      "wilson95_upper": 1.0,
+      "calibration_available": true
+    },
+    {
+      "tier": "high",
+      "predicted_model": "gpt-5.6-sol",
+      "threshold": 0.95,
+      "selected": 13,
+      "correct": 13,
+      "observed_precision": 1.0,
+      "wilson95_lower": 0.7719046276458016,
+      "wilson95_upper": 0.9999999999999999,
+      "calibration_available": true
+    },
+    {
+      "tier": "high",
+      "predicted_model": "gpt-5.6-terra",
+      "threshold": 0.9,
+      "selected": 0,
+      "correct": 0,
+      "observed_precision": null,
+      "wilson95_lower": null,
+      "wilson95_upper": null,
+      "calibration_available": false
+    },
+    {
+      "tier": "high",
+      "predicted_model": "gpt-5.6-luna",
+      "threshold": 0.9,
+      "selected": 0,
+      "correct": 0,
+      "observed_precision": null,
+      "wilson95_lower": null,
+      "wilson95_upper": null,
+      "calibration_available": false
+    }
+  ],
+  "limitations": [
+    "The observed label proportions are not deployment population priors.",
+    "High-tier Terra and Luna reliability are not calibrated.",
+    "Unknown or open-set models are not covered.",
+    "Custom probes, request counts, request formats, or candidate model sets require recalibration.",
+    "Upstream routing drift requires a new time-separated calibration run."
+  ]
+}

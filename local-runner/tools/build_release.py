@@ -12,7 +12,7 @@ import zipfile
 
 RUNNER_ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_ROOT = RUNNER_ROOT.parent
-SCORING_RELEASE = REPOSITORY_ROOT / "scoring-releases" / "gpt56-v3"
+SCORING_RELEASE = REPOSITORY_ROOT / "scoring-releases" / "gpt56-v4"
 
 
 def _copy_tree(source: Path, target: Path) -> None:

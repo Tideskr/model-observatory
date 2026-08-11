@@ -23,7 +23,7 @@ export interface AppServices {
 export function createMemoryServices(config: AppConfig, providerRegistry: ProviderRegistry = EMPTY_PROVIDER_REGISTRY): AppServices {
   const runStore = new MemoryRunStore()
   const credentialVault = new MemoryCredentialVault(config.credentialMasterKey)
-  const publicRepository = new MemoryPublicRepository()
+  const publicRepository = new MemoryPublicRepository([], config.scoringReleaseId)
   const contributionStore = new MemoryContributionStore()
   return {
     runStore,

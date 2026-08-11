@@ -124,7 +124,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     quoteTtlSeconds: 10 * 60,
     runRetentionHours: 24,
     maxRunRequests: 500,
-    scoringReleaseId: environment['SCORING_RELEASE_ID'] ?? 'stage-c-trusted-fingerprint-v3',
+    scoringReleaseId: environment['SCORING_RELEASE_ID'] ?? 'stage-c-trusted-fingerprint-v4',
     repositoryUrl: repositoryUrl(environment['REPOSITORY_URL']),
     trustProxy: trustProxy(environment['TRUST_PROXY']),
     frontendDistDir: frontendDistDir(environment['FRONTEND_DIST_DIR']),

@@ -1,6 +1,6 @@
 """Local execution service for Model Observatory private checks."""
 
-__version__ = "4.2.0"
+__version__ = "4.2.1"
 
 from .juice import JuiceSession, classify_juice_answer
 from .probability_model import ProbabilityModel, fit_baseline, js_divergence
