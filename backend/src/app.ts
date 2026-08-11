@@ -4,8 +4,9 @@ import helmet from '@fastify/helmet'
 import rateLimit from '@fastify/rate-limit'
 import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
+import fastifyStatic from '@fastify/static'
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox'
-import Fastify, { type FastifyInstance } from 'fastify'
+import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify'
 import { loadConfig, type AppConfig } from './config.js'
 import { errorHandler } from './errors.js'
 import { healthRoutes } from './routes/health.js'
@@ -18,6 +19,10 @@ export interface BuildAppOptions {
   config?: AppConfig
   logger?: boolean
   services?: AppServices
+}
+
+function sendFrontendIndex(reply: FastifyReply) {
+  return reply.sendFile('index.html', { maxAge: 0, immutable: false })
 }
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
@@ -101,5 +106,18 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(publicRoutes, { prefix: '/api/v1', repository: services.publicRepository })
   await app.register(privateRunRoutes, { prefix: '/api/v1', config, services })
   await app.register(contributionRoutes, { prefix: '/api/v1', config, services })
+  if (config.frontendDistDir) {
+    await app.register(fastifyStatic, {
+      root: config.frontendDistDir,
+      wildcard: false,
+      maxAge: '30d',
+      immutable: true,
+    })
+    app.get('/', async (_request, reply) => sendFrontendIndex(reply))
+    app.get('/*', async (request, reply) => {
+      if (request.url.startsWith('/api/')) return reply.callNotFound()
+      return sendFrontendIndex(reply)
+    })
+  }
   return app
 }

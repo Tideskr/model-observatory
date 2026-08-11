@@ -15,6 +15,6 @@ export function createDatabasePool(config: AppConfig): DatabasePool {
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 5_000,
     application_name: 'model-observatory-api',
-    ssl: config.appEnv === 'production' ? { rejectUnauthorized: true } : undefined,
+    ssl: config.databaseSsl ? { rejectUnauthorized: true } : false,
   })
 }

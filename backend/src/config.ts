@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { isIP } from 'node:net'
+import { isAbsolute } from 'node:path'
 
 export type AppEnvironment = 'development' | 'test' | 'production'
 
@@ -9,6 +10,7 @@ export interface AppConfig {
   port: number
   publicOrigin: string
   databaseUrl: string
+  databaseSsl: boolean
   logLevel: string
   enableApiDocs: boolean
   tokenPepper: string
@@ -20,6 +22,7 @@ export interface AppConfig {
   scoringReleaseId: string
   repositoryUrl: string
   trustProxy: false | string | string[] | number
+  frontendDistDir: string | null
 }
 
 function parseEnvironment(value: string | undefined): AppEnvironment {
@@ -91,6 +94,12 @@ function trustProxy(value: string | undefined): AppConfig['trustProxy'] {
   return addresses.length === 1 ? addresses[0]! : addresses
 }
 
+function frontendDistDir(value: string | undefined): string | null {
+  if (!value) return null
+  if (!isAbsolute(value)) throw new Error('FRONTEND_DIST_DIR must be an absolute path')
+  return value
+}
+
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
   const appEnv = parseEnvironment(environment['APP_ENV'] ?? environment['NODE_ENV'])
   const publicOrigin = environment['PUBLIC_ORIGIN'] ?? 'http://localhost:5173'
@@ -105,6 +114,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     port: parsePort(environment['PORT']),
     publicOrigin: origin.origin,
     databaseUrl: environment['DATABASE_URL'] ?? 'memory:',
+    databaseSsl: parseBoolean(environment['DATABASE_SSL'], appEnv === 'production'),
     logLevel: environment['LOG_LEVEL'] ?? 'info',
     enableApiDocs: parseBoolean(environment['ENABLE_API_DOCS'], appEnv !== 'production'),
     tokenPepper: secret(environment['TOKEN_PEPPER'], 'TOKEN_PEPPER', appEnv),
@@ -116,5 +126,6 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     scoringReleaseId: environment['SCORING_RELEASE_ID'] ?? 'stage-c-trusted-likelihood-v2',
     repositoryUrl: repositoryUrl(environment['REPOSITORY_URL']),
     trustProxy: trustProxy(environment['TRUST_PROXY']),
+    frontendDistDir: frontendDistDir(environment['FRONTEND_DIST_DIR']),
   }
 }

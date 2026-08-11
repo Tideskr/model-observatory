@@ -63,6 +63,16 @@ cd frontend
 npm run build
 ```
 
+## Docker 部署
+
+根目录的 `Dockerfile` 会构建前后端单一应用镜像；`compose.production.yml` 同时运行 PostgreSQL、迁移任务、API 和 worker。复制 `deploy/.env.production.example` 并替换全部密钥后启动：
+
+```bash
+docker compose --env-file .env.production -f compose.production.yml up -d --build
+```
+
+容器端口默认只发布到宿主机 `127.0.0.1:18787`。`deploy/Caddyfile` 提供 `check.skr.moe` 的 HTTPS 反向代理配置。
+
 ## 目录
 
 ```text
