@@ -110,6 +110,9 @@ export function createDraft(csrf: string, sourceContentSha256?: string): Promise
     method: 'POST', body: JSON.stringify(sourceContentSha256 ? { source_content_sha256: sourceContentSha256 } : {}),
   }, csrf)
 }
+export function deleteDraft(id: string, csrf: string): Promise<void> {
+  return request(`/api/v1/admin/registry/drafts/${id}`, { method: 'DELETE' }, csrf)
+}
 export function saveDraft(id: string, revision: number, document: ProviderRegistryDocument, csrf: string): Promise<RegistryDraft> {
   return request(`/api/v1/admin/registry/drafts/${id}`, {
     method: 'PATCH', body: JSON.stringify({ revision, document }),

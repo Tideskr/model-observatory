@@ -1648,7 +1648,14 @@ body:has(.admin-page) {
   border-top: 1px solid var(--line);
 }
 
-.admin-draft-list > button {
+.admin-draft-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-draft-select {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1657,10 +1664,10 @@ body:has(.admin-page) {
   text-align: left;
   background: transparent;
   border: 0;
-  border-bottom: 1px solid var(--line);
 }
 
-.admin-draft-list > button:hover { color: var(--accent-deep); }
+.admin-draft-select:hover { color: var(--accent-deep); }
+.admin-draft-item > .btn-icon { margin-left: var(--sp-3); color: var(--status-bad); border: 0; }
 .admin-draft-list span { display: grid; gap: 2px; }
 .admin-draft-list small { color: var(--ink-faint); }
 

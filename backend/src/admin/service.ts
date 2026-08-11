@@ -211,6 +211,33 @@ export class AdminService {
     return draft(result.rows[0])
   }
 
+  async deleteDraft(id: string, identity: AdminIdentity): Promise<void> {
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const deleted = await client.query<{ revision: number; base_content_sha256: string }>(
+        `DELETE FROM provider_registry_drafts WHERE id=$1 AND status='draft'
+         RETURNING revision,base_content_sha256`,
+        [id],
+      )
+      if (!deleted.rows[0]) {
+        const existing = await client.query<{ status: RegistryDraft['status'] }>(
+          'SELECT status FROM provider_registry_drafts WHERE id=$1', [id],
+        )
+        if (!existing.rows[0]) throw new AppError(404, 'registry_draft_not_found', 'The registry draft does not exist.')
+        throw new AppError(409, 'registry_draft_closed', 'Only unpublished drafts can be deleted.')
+      }
+      await appendAudit(client, identity, this.config.sessionSecret, 'provider_registry.draft.deleted', 'provider_registry_draft', id, {
+        revision: deleted.rows[0].revision,
+        base_content_sha256: deleted.rows[0].base_content_sha256,
+      })
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally { client.release() }
+  }
+
   async createDraft(identity: AdminIdentity, sourceContentSha256?: string): Promise<RegistryDraft> {
     const file = await this.github.getRegistryFile()
     let document = file.document

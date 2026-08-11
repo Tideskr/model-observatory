@@ -122,6 +122,12 @@ export const adminRoutes: FastifyPluginAsyncTypebox<AdminRouteOptions> = async (
     return draftResponse(await admin.updateDraft(request.params.id, request.body.revision, request.body.document, identity))
   })
 
+  app.delete('/admin/registry/drafts/:id', { schema: { params: RegistryDraftParamsSchema } }, async (request, reply) => {
+    const { admin, identity } = await authenticated(request, config, services, true)
+    await admin.deleteDraft(request.params.id, identity)
+    void reply.status(204).send()
+  })
+
   app.post('/admin/registry/drafts/:id/validate', {
     schema: { params: RegistryDraftParamsSchema, body: ValidateRegistrySchema },
   }, async (request) => {

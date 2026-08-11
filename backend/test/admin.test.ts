@@ -84,6 +84,32 @@ test('OAuth state and PKCE payload reject tampering', () => {
   assert.throws(() => service.consumeOAuth(flow.cookie, `${flow.state}x`), /authorization state is invalid/)
 })
 
+test('unpublished draft deletion is atomic and audited', async () => {
+  const statements: Array<{ sql: string; values: unknown[] | undefined }> = []
+  const client = {
+    query: async (sql: string, values?: unknown[]) => {
+      statements.push({ sql, values })
+      if (sql.includes('DELETE FROM provider_registry_drafts')) {
+        return { rows: [{ revision: 3, base_content_sha256: 'a'.repeat(64) }], rowCount: 1 }
+      }
+      return { rows: [], rowCount: 0 }
+    },
+    release() {},
+  }
+  const pool = { connect: async () => client } as unknown as DatabasePool
+  const service = new AdminService(adminConfig(), pool, new ReloadableProviderRegistry(createProviderRegistry(document)))
+  const draftId = '11111111-1111-4111-8111-111111111111'
+  await service.deleteDraft(draftId, { id: 42, login: 'cae', avatarUrl: '' })
+
+  const deletion = statements.find((item) => item.sql.includes('DELETE FROM provider_registry_drafts'))
+  assert.match(deletion?.sql ?? '', /status='draft'/)
+  assert.deepEqual(deletion?.values, [draftId])
+  const audit = statements.find((item) => item.sql.includes('INSERT INTO audit_events'))
+  assert.deepEqual(audit?.values?.slice(0, 4), ['provider_registry.draft.deleted', 'provider_registry_draft', draftId, 'github_admin'])
+  assert.equal(statements[0]?.sql, 'BEGIN')
+  assert.equal(statements.at(-1)?.sql, 'COMMIT')
+})
+
 test('reloadable registry swaps complete immutable snapshots', () => {
   const first = createProviderRegistry(document)
   const runtime = new ReloadableProviderRegistry(first)
@@ -111,10 +137,12 @@ test('admin mutations require both the trusted origin and CSRF token', async (co
   const config = loadConfig({ APP_ENV: 'test', ENABLE_API_DOCS: 'false', PUBLIC_ORIGIN: 'https://check.example' })
   const services = createMemoryServices(config, createProviderRegistry(document))
   const identity = { id: 42, login: 'cae', avatarUrl: '' }
+  let deletedDraftId: string | null = null
   services.adminService = {
     session: async (token?: string) => token === 'session-token' ? { identity, csrfToken: 'csrf-token' } : null,
     verifyCsrf: (_token: string, value?: string) => value === 'csrf-token',
     currentRegistry: async () => ({ document, contentSha256: 'a'.repeat(64), gitBlobSha: 'blob', gitContentSha256: 'a'.repeat(64), synchronized: true }),
+    deleteDraft: async (id: string) => { deletedDraftId = id },
   } as unknown as AdminService
   const app = await buildApp({ config, services, logger: false })
   context.after(() => app.close())
@@ -125,6 +153,13 @@ test('admin mutations require both the trusted origin and CSRF token', async (co
   const missingCsrf = await app.inject({ method: 'POST', url: '/api/v1/admin/registry/drafts', headers: { ...headers, origin: 'https://check.example' }, payload: {} })
   assert.equal(missingCsrf.statusCode, 403)
   assert.equal(missingCsrf.json().code, 'admin_csrf_invalid')
+  const draftId = '11111111-1111-4111-8111-111111111111'
+  const deleted = await app.inject({
+    method: 'DELETE', url: `/api/v1/admin/registry/drafts/${draftId}`,
+    headers: { cookie: 'mo_admin=session-token', origin: 'https://check.example', 'x-csrf-token': 'csrf-token' },
+  })
+  assert.equal(deleted.statusCode, 204, deleted.body)
+  assert.equal(deletedDraftId, draftId)
 })
 
 test('registry synchronization persists the full document and emits a commit-scoped notification', async () => {

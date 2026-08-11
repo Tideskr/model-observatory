@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { PageHeader, Pill } from '../components/ui'
 import {
   AdminApiError, SCORED_MODELS, adminLoginUrl, createDraft, fetchAdminSession, fetchCurrentRegistry,
-  fetchDrafts, fetchRegistryVersions, logoutAdmin, publishDraft, saveDraft, validateDraft,
+  deleteDraft, fetchDrafts, fetchRegistryVersions, logoutAdmin, publishDraft, saveDraft, validateDraft,
   type AdminSessionResponse, type ProviderRegistryDocument, type RegistryDraft, type RegistryProvider, type RegistryVersion,
 } from '../api/adminRegistry'
 
@@ -162,6 +162,19 @@ function AdminWorkspace({ session, onSessionChange }: { session: AdminSessionRes
       toast.success(published.status === 'published' ? 'Registry 已发布并激活' : 'Git 已提交，等待自动激活')
     } catch (reason) { setError(message(reason)) } finally { setBusy(false) }
   }
+  const removeDraft = async (target: RegistryDraft) => {
+    const losesChanges = draft?.id === target.id && dirty ? ' 未保存的修改也会丢失。' : ''
+    if (!window.confirm(`确认永久删除草稿 r${target.revision}？${losesChanges}`)) return
+    setBusy(true); setError(null)
+    try {
+      await deleteDraft(target.id, csrf)
+      setDrafts((items) => items.filter((item) => item.id !== target.id))
+      if (draft?.id === target.id) {
+        setDraft(null); setDocument(null); setDirty(false); setConfirmPublish(false)
+      }
+      toast.success('草稿已删除')
+    } catch (reason) { setError(message(reason)) } finally { setBusy(false) }
+  }
   const replaceProvider = (index: number, provider: RegistryProvider) => {
     if (document) mutateDocument({ ...document, providers: document.providers.map((item, itemIndex) => itemIndex === index ? provider : item) })
   }
@@ -210,9 +223,9 @@ function AdminWorkspace({ session, onSessionChange }: { session: AdminSessionRes
     {!draft || !document ? <div className="admin-start">
       <ShieldCheck size={32} aria-hidden="true" /><div><h2>选择或创建草稿</h2><p>线上版本不会因草稿编辑而变化，只有确认发布后才会提交并激活。</p></div>
       <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void newDraft()}><Plus size={16} />新建草稿</button>
-      {editableDrafts.length > 0 && <div className="admin-draft-list">{editableDrafts.map((item) => <button type="button" key={item.id} onClick={() => selectDraft(item)}><span><strong>未发布草稿</strong><small>@{item.updated_by_login} · {dateTime(item.updated_at)}</small></span><code>r{item.revision}</code></button>)}</div>}
+      {editableDrafts.length > 0 && <div className="admin-draft-list">{editableDrafts.map((item) => <div className="admin-draft-item" key={item.id}><button type="button" className="admin-draft-select" disabled={busy} onClick={() => selectDraft(item)}><span><strong>未发布草稿</strong><small>@{item.updated_by_login} · {dateTime(item.updated_at)}</small></span><code>r{item.revision}</code></button><IconButton label="删除草稿" disabled={busy} onClick={() => void removeDraft(item)}><Trash2 size={15} /></IconButton></div>)}</div>}
     </div> : <>
-      <div className="admin-toolbar"><div className="admin-toolbar-meta"><strong>草稿 r{draft.revision}</strong><span>基于 {shortSha(draft.base_content_sha256)}</span>{dirty && <Pill tone="warn" size="sm">未保存</Pill>}</div><div className="admin-toolbar-actions"><button type="button" className="btn btn-sm" disabled={busy || !dirty} onClick={() => selectDraft(draft)}><RotateCcw size={14} />放弃修改</button><button type="button" className="btn btn-sm" disabled={busy} onClick={() => void validate()}><CheckCircle2 size={14} />验证</button><button type="button" className="btn btn-sm" disabled={busy || !dirty} onClick={() => void save()}><Save size={14} />保存草稿</button><button type="button" className="btn btn-primary btn-sm" disabled={busy || draft.status !== 'draft'} onClick={() => setConfirmPublish(true)}><Upload size={14} />发布</button></div></div>
+      <div className="admin-toolbar"><div className="admin-toolbar-meta"><strong>草稿 r{draft.revision}</strong><span>基于 {shortSha(draft.base_content_sha256)}</span>{dirty && <Pill tone="warn" size="sm">未保存</Pill>}</div><div className="admin-toolbar-actions"><button type="button" className="btn btn-sm admin-danger" disabled={busy} onClick={() => void removeDraft(draft)}><Trash2 size={14} />删除草稿</button><button type="button" className="btn btn-sm" disabled={busy || !dirty} onClick={() => selectDraft(draft)}><RotateCcw size={14} />放弃修改</button><button type="button" className="btn btn-sm" disabled={busy} onClick={() => void validate()}><CheckCircle2 size={14} />验证</button><button type="button" className="btn btn-sm" disabled={busy || !dirty} onClick={() => void save()}><Save size={14} />保存草稿</button><button type="button" className="btn btn-primary btn-sm" disabled={busy || draft.status !== 'draft'} onClick={() => setConfirmPublish(true)}><Upload size={14} />发布</button></div></div>
       {confirmPublish && <div className="admin-publish-confirm" role="alert"><div><strong>确认发布到 main？</strong><span>{changes.length ? `本次包含 ${changes.length} 项配置变化。` : '当前草稿与线上版本没有结构变化。'}</span></div><button type="button" className="btn btn-sm" onClick={() => setConfirmPublish(false)}>取消</button><button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void publish()}><Upload size={14} />确认发布</button></div>}
       <div className="admin-workbench">
         <aside className="admin-provider-list"><div className="admin-provider-list-head"><strong>供应商</strong><button type="button" className="btn-icon" aria-label="添加供应商" title="添加供应商" onClick={addProvider}><Plus size={16} /></button></div><div className="admin-provider-items">{document.providers.map((provider, index) => <div className={selectedProvider === index ? 'admin-provider-item is-active' : 'admin-provider-item'} key={index}><button type="button" className="admin-provider-select" onClick={() => setSelectedProvider(index)}><strong>{provider.name || '未命名供应商'}</strong><code>{provider.slug || 'missing-slug'}</code></button><div className="admin-provider-actions"><IconButton label="上移" disabled={index === 0} onClick={() => moveProvider(index, -1)}><ArrowUp size={13} /></IconButton><IconButton label="下移" disabled={index === document.providers.length - 1} onClick={() => moveProvider(index, 1)}><ArrowDown size={13} /></IconButton><IconButton label="复制" onClick={() => duplicateProvider(index)}><Copy size={13} /></IconButton></div></div>)}</div></aside>
