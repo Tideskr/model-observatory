@@ -180,7 +180,7 @@ export const contributionRoutes: FastifyPluginAsyncTypebox<ContributionRouteOpti
     },
     async (request) => {
       const target = normalizeTarget(request.body.base_url)
-      const provider = services.providerRegistry.findByHostname(target.hostname)
+      const provider = services.providerRegistry.findActiveByHostname(target.hostname)
       if (!provider) throw new AppError(404, 'provider_not_registered', 'This API hostname is not registered to a provider.')
       if (provider.groups.length === 0) throw new AppError(409, 'provider_groups_unconfigured', 'This provider does not have any configured detection groups yet.')
       if (request.body.group_id && !provider.groups.some((item) => item.id === request.body.group_id)) {

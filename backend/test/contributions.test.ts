@@ -158,3 +158,27 @@ test('registry proposals respect pinned Legacy prompts and remain GitOps-pending
   assert.equal(fetched.statusCode, 200)
   assert.equal(fetched.json().content_sha256, created.json().content_sha256)
 })
+
+test('retired provider domains cannot receive new donation quotes', async (context) => {
+  const retiredRegistry = createProviderRegistry(parseProviderRegistry({
+    schema_version: 2,
+    pricing: { input_per_million_usd: 1.25, output_per_million_usd: 10 },
+    providers: [{
+      slug: 'retired-example', name: 'Retired Example', kind: 'relay',
+      domains: [{ hostname: 'retired.example.com', role: 'primary', default_base_path: '/v1', status: 'retired' }],
+      group_detection: { probe_model: '__group_probe__' },
+      groups: [{ id: 'default', name: 'Default', aliases: [], multiplier: 1, models: ['gpt-5.6-sol'] }],
+    }],
+  }))
+  const services = createMemoryServices(config, retiredRegistry)
+  const app = await buildApp({ config, services, logger: false })
+  context.after(() => app.close())
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/v1/donations/quote',
+    payload: { kind: 'api', base_url: 'https://retired.example.com/v1', constraints: { quota_usd: 10, concurrency: 1, interval_minutes: 240, expires_in_days: 7 } },
+  })
+  assert.equal(response.statusCode, 404)
+  assert.equal(response.json().code, 'provider_not_registered')
+})

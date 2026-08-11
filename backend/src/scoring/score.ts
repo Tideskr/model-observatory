@@ -1,7 +1,7 @@
 import type { RunStatus } from '../contracts/common.js'
 import type { RunRecord, StoredObservation } from '../store/run-store.js'
 import type { ProbeJob } from '../executor/job-plan.js'
-import type { ScoringCalibrationSeed, ScoringCellSeed, ScoringReleaseSeed } from './types.js'
+import type { ScoringCalibrationSeed, ScoringCellSeed, ScoringReleaseSeed, VerdictRuleSeed } from './types.js'
 
 const TARGET_MODELS = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'] as const
 const MODEL_LABELS: Record<string, string> = { 'gpt-5.6-sol': 'Sol', 'gpt-5.6-terra': 'Terra', 'gpt-5.6-luna': 'Luna' }
@@ -284,6 +284,55 @@ function probabilitySummary(run: RunRecord, rows: StoredObservation[], seed: Sco
   }
 }
 
+const FALLBACK_VERDICT_RULE: VerdictRuleSeed = {
+  priority: Number.MAX_SAFE_INTEGER,
+  ruleId: 'runtime-fallback',
+  title: null,
+  predicateId: 'fallback',
+  severe: false,
+}
+
+function matchesVerdictRule(
+  rule: VerdictRuleSeed,
+  juice: Record<string, unknown>,
+  outputHard: boolean,
+  coverageHard: boolean,
+  probability: Record<string, unknown>,
+): boolean {
+  switch (rule.predicateId) {
+    case 'juice_all_unsuccessful':
+      return juice['juice_all_unsuccessful'] === true
+    case 'juice_mixed_or_deterministic_anomaly':
+      return juice['juice_mixed'] === true || outputHard || coverageHard
+    case 'juice_not_passed':
+      return juice['juice_pass'] !== true
+    case 'juice_pass_and_probability_alert':
+      return juice['juice_pass'] === true && probability['enabled'] === true && (
+        probability['pure_model_alert'] === true || probability['mixture_alert'] === true
+      )
+    case 'juice_pass_and_probability_pass_or_disabled':
+      return juice['juice_pass'] === true && (
+        probability['enabled'] !== true || probability['probability_pass'] === true
+      )
+    case 'fallback':
+      return true
+    default:
+      return false
+  }
+}
+
+function renderVerdict(rule: VerdictRuleSeed, fingerprintText: string): string {
+  switch (rule.predicateId) {
+    case 'juice_all_unsuccessful': return '可能非GPT'
+    case 'juice_mixed_or_deterministic_anomaly': return `Juice与申报型号不一致；${fingerprintText}`
+    case 'juice_not_passed': return `Juice证据不足；${fingerprintText}`
+    case 'juice_pass_and_probability_alert': return `仅概率探针混用；${fingerprintText}`
+    case 'juice_pass_and_probability_pass_or_disabled': return `Juice通过；${fingerprintText}`
+    case 'fallback': return `Juice通过但概率探针证据不足；${fingerprintText}`
+    default: return `${rule.title ?? '评分规则未定义'}；${fingerprintText}`
+  }
+}
+
 export function scoreStoredRun(run: RunRecord, rows: StoredObservation[], seed: ScoringReleaseSeed): ScoringResult {
   const juice = juiceSummary(run, rows)
   const outputHard = rows.some((item) => item.probeId.startsWith('output_') && item.hardAnomaly)
@@ -292,11 +341,10 @@ export function scoreStoredRun(run: RunRecord, rows: StoredObservation[], seed: 
   const fingerprintStrong = probability['fingerprint_status'] === 'strong_match'
   const fingerprintModel = typeof probability['fingerprint_model'] === 'string' ? probability['fingerprint_model'] : null
   const fingerprintText = fingerprintStrong ? `指纹强烈指向 ${MODEL_LABELS[fingerprintModel ?? ''] ?? fingerprintModel}` : '指纹证据不明确'
-  let verdict: string
-  if (juice['juice_all_unsuccessful']) verdict = '可能非GPT'
-  else if (juice['juice_mixed'] || outputHard || coverageHard) verdict = `Juice与申报型号不一致；${fingerprintText}`
-  else if (!juice['juice_pass']) verdict = `Juice证据不足；${fingerprintText}`
-  else verdict = `Juice通过；${fingerprintText}`
+  const rules = [...(seed.verdictRules.length ? seed.verdictRules : [FALLBACK_VERDICT_RULE])]
+    .toSorted((left, right) => left.priority - right.priority)
+  const verdictRule = rules.find((rule) => matchesVerdictRule(rule, juice, outputHard, coverageHard, probability)) ?? FALLBACK_VERDICT_RULE
+  const verdict = renderVerdict(verdictRule, fingerprintText)
 
   const successful = rows.filter((item) => item.status === 'ok').length
   const errors = rows.filter((item) => item.status === 'error').length
@@ -332,6 +380,9 @@ export function scoreStoredRun(run: RunRecord, rows: StoredObservation[], seed: 
     summary: {
       overall_verdict: verdict,
       title_cn: verdict,
+      verdict_rule_id: verdictRule.ruleId,
+      verdict_rule_title: verdictRule.title,
+      verdict_rule_severe: verdictRule.severe,
       subtitle_cn: status === 'completed' ? '检测已完成，以下结论只适用于本次目标、配置和评分版本。' : '部分请求失败，请结合网络错误与逐请求观测阅读结论。',
       verdict_available: true,
       operational_status: status,

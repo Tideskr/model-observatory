@@ -51,4 +51,5 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o ServerAliveInterval=15 \
             -o ServerAliveCountMax=4 \
-            "$VPS_USER@$VPS_HOST"
+            "$VPS_USER@$VPS_HOST" \
+            'cd /opt/model-observatory && ./deploy/server-deploy.sh'

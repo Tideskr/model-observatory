@@ -5,6 +5,7 @@ import { loadConfig } from '../src/config.js'
 import { createProviderRegistry, parseProviderRegistry } from '../src/registry/catalog.js'
 import { importScoringRelease, defaultScoringReleaseManifest } from '../src/scoring/release-import.js'
 import { createMemoryServices } from '../src/services.js'
+import { AppError } from '../src/errors.js'
 import type { DonationRecord } from '../src/store/contribution-store.js'
 import { RunWorker } from '../src/worker/run-worker.js'
 import { DonationScheduler } from '../src/worker/donation-scheduler.js'
@@ -90,5 +91,25 @@ test('donated credentials schedule a full medium run and activate after valid ev
   assert.equal(active?.groupAttribution, 'verified')
   assert.equal(active?.progressCurrent, 64)
   assert.ok((active?.quotaSpentUsd ?? 0) > 0)
+  await services.close()
+})
+
+test('revocation fences an already claimed donation before cycle creation', async () => {
+  const services = createMemoryServices(config, registry)
+  const record = await donationRecord(services)
+  await services.contributionStore.createDonation(record)
+  const claimed = await services.contributionStore.claimDueDonation('revocation-race-worker', 60)
+  assert.ok(claimed)
+
+  await services.contributionStore.revokeDonation(record.id, new Date().toISOString())
+  await assert.rejects(
+    () => services.contributionStore.createDonationCycle({
+      id: randomUUID(), donationId: record.id, status: 'running', attribution: 'verified',
+      reservedCostUsd: 1, actualCostUsd: 0, createdAt: new Date().toISOString(), completedAt: null,
+    }, [], 'revocation-race-worker'),
+    (error: unknown) => error instanceof AppError && error.code === 'donation_lease_lost',
+  )
+  assert.equal((await services.contributionStore.listPendingDonationRuns()).length, 0)
+  assert.equal(await services.contributionStore.claimDueDonation('another-worker', 60), null)
   await services.close()
 })

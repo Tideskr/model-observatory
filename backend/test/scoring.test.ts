@@ -58,3 +58,24 @@ test('medium preset uses the exact v3 runtime contract and produces a formal fin
   assert.equal(probability['probability_pass'], true)
   assert.equal(result.summary['overall_verdict'], 'Juice通过；指纹强烈指向 Sol')
 })
+
+test('verdict selection follows the imported release rule set', async () => {
+  const seed = await importScoringRelease(defaultScoringReleaseManifest())
+  const run = {
+    id: randomUUID(), quoteId: randomUUID(), requestDigest: 'e'.repeat(64), status: 'running',
+    targetOrigin: 'https://api.example.com', targetBaseUrl: 'https://api.example.com/v1', targetHostname: 'api.example.com',
+    model: 'gpt-5.6-sol',
+    config: { probes: [{ probe_id: 'juice_high', requests: 1 }], formats: ['normal'], contexts: ['no_history'], workers: 1, retries: 0 },
+    disclosureVersion: 'remote-normal-v1', scoringReleaseId: seed.id, ownerTokenHash: 'f'.repeat(64),
+    idempotencyKey: 'verdict-rule-test', credentialHandle: randomUUID(), createdAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 60_000).toISOString(), leaseVersion: 0,
+  } as RunRecord
+  const job = buildRunJobs(run, seed)[0]!
+  const rows: RawObservation[] = [{ job, status: 'ok', answer: '8', elapsedMs: 1 }]
+  const result = scoreRun(run, rows, {
+    ...seed,
+    verdictRules: [{ priority: 1, ruleId: 'forced-fallback', title: 'Forced fallback', predicateId: 'fallback', severe: false }],
+  })
+  assert.equal(result.summary['verdict_rule_id'], 'forced-fallback')
+  assert.match(String(result.summary['overall_verdict']), /^Juice通过但概率探针证据不足；/)
+})

@@ -106,6 +106,7 @@ export class RunWorker {
       cleanupCredential = true
     } catch (error) {
       if (error instanceof LeaseLostError || controller.signal.reason instanceof LeaseLostError) return
+      controller.abort(error instanceof Error ? error : new Error('Worker execution failed.'))
       const latest = await this.#services.runStore.get(run.id)
       if (latest && !['cancelled', 'deleted', 'completed', 'failed', 'incomplete'].includes(latest.status)) {
         const failure = error instanceof TransportError

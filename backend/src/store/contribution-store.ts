@@ -144,6 +144,7 @@ export class MemoryContributionStore implements ContributionStore {
       record.status = 'revoked'
       record.revokedAt = revokedAt
     }
+    this.#claims.delete(id)
     return structuredClone(record)
   }
 
@@ -151,6 +152,7 @@ export class MemoryContributionStore implements ContributionStore {
     const record = this.#donations.get(id)
     if (!record) throw new AppError(404, 'donation_not_found', 'The donation does not exist.')
     if (record.status !== 'revoked') record.status = 'expired'
+    this.#claims.delete(id)
     return structuredClone(record)
   }
 
@@ -177,7 +179,9 @@ export class MemoryContributionStore implements ContributionStore {
   async createDonationCycle(cycle: DonationCycleRecord, runs: DonationTestRunRecord[], workerId: string): Promise<void> {
     const donation = this.#donations.get(cycle.donationId)
     const claim = this.#claims.get(cycle.donationId)
-    if (!donation || !claim || claim.workerId !== workerId) throw new AppError(409, 'donation_lease_lost', 'The donation worker lease was lost.')
+    if (!donation || !['quarantined', 'active'].includes(donation.status) || !claim || claim.workerId !== workerId) {
+      throw new AppError(409, 'donation_lease_lost', 'The donation worker lease was lost.')
+    }
     this.#cycles.set(cycle.id, structuredClone(cycle))
     for (const run of runs) this.#testRuns.set(run.privateRunId, structuredClone(run))
     donation.phase = 'testing'

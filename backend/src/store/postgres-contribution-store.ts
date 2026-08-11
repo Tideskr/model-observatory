@@ -235,7 +235,11 @@ export class PostgresContributionStore implements ContributionStore {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
-      const owned = await client.query('SELECT id FROM donations WHERE id=$1 AND worker_id=$2 AND lease_expires_at>now() FOR UPDATE', [cycle.donationId, workerId])
+      const owned = await client.query(
+        `SELECT id FROM donations
+         WHERE id=$1 AND status IN ('quarantined','active') AND worker_id=$2 AND lease_expires_at>now() FOR UPDATE`,
+        [cycle.donationId, workerId],
+      )
       if (!owned.rowCount) throw new AppError(409, 'donation_lease_lost', 'The donation worker lease was lost.')
       await client.query(
         `INSERT INTO donation_cycles(id,donation_id,status,attribution,reserved_cost_usd,actual_cost_usd,created_at,completed_at)
@@ -403,7 +407,8 @@ export class PostgresContributionStore implements ContributionStore {
       await client.query('BEGIN')
       const result = await client.query<DonationRow>(
         `UPDATE donations SET status = CASE WHEN status='revoked' THEN status ELSE $2 END,
-         revoked_at = CASE WHEN status='revoked' THEN revoked_at ELSE COALESCE($3,revoked_at) END
+         revoked_at = CASE WHEN status='revoked' THEN revoked_at ELSE COALESCE($3,revoked_at) END,
+         worker_id=NULL,lease_expires_at=NULL
          WHERE id=$1 RETURNING ${donationColumns}`,
         [id, status, revokedAt],
       )

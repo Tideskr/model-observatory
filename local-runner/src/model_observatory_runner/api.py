@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import math
 import secrets
@@ -40,6 +41,12 @@ class ApiProblem(ValueError):
         self.status = status
         self.code = code
         self.detail = detail
+
+
+@dataclass
+class _PendingRun:
+    event: threading.Event = field(default_factory=threading.Event)
+    error: BaseException | None = None
 
 
 def _integer(value: Any, name: str, minimum: int, maximum: int) -> int:
@@ -203,6 +210,7 @@ class ObservatoryApi:
         self.quotes: dict[str, dict[str, Any]] = {}
         self.runs: dict[str, dict[str, Any]] = {}
         self.idempotency: dict[str, str] = {}
+        self._pending_runs: dict[str, _PendingRun] = {}
 
     def issue_quote(self, body: Any) -> dict[str, Any]:
         if not isinstance(body, dict):
@@ -263,63 +271,91 @@ class ObservatoryApi:
             raise ApiProblem(400, "invalid_request", "request body must be an object")
         if not 8 <= len(idempotency_key) <= 128:
             raise ApiProblem(400, "invalid_idempotency_key", "Idempotency-Key must contain 8-128 characters")
+        pending: _PendingRun | None = None
+        owner = False
         with self.lock:
             self._cleanup()
             existing_id = self.idempotency.get(idempotency_key)
             if existing_id:
                 return self._create_response(self.runs[existing_id])
-            quote_token = str(body.get("quote_token") or "")
-            quote = self.quotes.get(quote_token)
-            if quote is None or _expired(quote["expires_at"]):
-                raise ApiProblem(400, "invalid_quote", "the local run quote is invalid or expired")
-        api_key = body.get("api_key")
-        if not isinstance(api_key, str) or not api_key or len(api_key) > 4096:
-            raise ApiProblem(400, "invalid_api_key", "api_key must contain 1-4096 characters")
-        consent = body.get("consent")
-        if not isinstance(consent, dict) or consent.get("disclosure_version") != DISCLOSURE_VERSION:
-            raise ApiProblem(400, "invalid_consent", "the disclosure version was not accepted")
+            pending = self._pending_runs.get(idempotency_key)
+            if pending is None:
+                pending = _PendingRun()
+                self._pending_runs[idempotency_key] = pending
+                owner = True
 
-        start_result = starter({
-            "base_url": quote["target_base_url"],
-            "model": quote["model"],
-            "api_key": api_key,
-            "config": deepcopy(quote["legacy_config"]),
-            "retention_enabled": False,
-        })
-        run_id = str(uuid.uuid4())
-        owner_token = secrets.token_urlsafe(48)
-        run = {
-            "run_id": run_id,
-            "owner_token": owner_token,
-            "session_id": start_result["session_id"],
-            "quote": deepcopy(quote),
-            "status": "running",
-            "created_at": utc_now(),
-            "expires_at": _expires(24 * 60 * 60),
-            "events": [{
-                "id": 1,
-                "type": "status",
-                "payload": {
-                    "status": "running",
-                    "phase": "executing",
-                    "completed": 0,
-                    "total": quote["estimate"]["requests"],
-                    "successful": 0,
-                    "errors": 0,
-                    "cancelled": 0,
-                    "pending": quote["estimate"]["requests"],
-                    "in_flight": 0,
-                    "http_attempts": 0,
-                    "retries": 0,
-                },
-            }],
-            "last_snapshot": None,
-            "report": None,
-        }
-        with self.lock:
-            self.runs[run_id] = run
-            self.idempotency[idempotency_key] = run_id
-        return self._create_response(run)
+        if not owner:
+            pending.event.wait()
+            with self.lock:
+                existing_id = self.idempotency.get(idempotency_key)
+                if existing_id:
+                    return self._create_response(self.runs[existing_id])
+                error = pending.error
+            if error is not None:
+                raise error
+            raise ApiProblem(500, "idempotency_incomplete", "the idempotent run did not produce a result")
+
+        try:
+            with self.lock:
+                quote_token = str(body.get("quote_token") or "")
+                quote = self.quotes.get(quote_token)
+                if quote is None or _expired(quote["expires_at"]):
+                    raise ApiProblem(400, "invalid_quote", "the local run quote is invalid or expired")
+            api_key = body.get("api_key")
+            if not isinstance(api_key, str) or not api_key or len(api_key) > 4096:
+                raise ApiProblem(400, "invalid_api_key", "api_key must contain 1-4096 characters")
+            consent = body.get("consent")
+            if not isinstance(consent, dict) or consent.get("disclosure_version") != DISCLOSURE_VERSION:
+                raise ApiProblem(400, "invalid_consent", "the disclosure version was not accepted")
+
+            start_result = starter({
+                "base_url": quote["target_base_url"],
+                "model": quote["model"],
+                "api_key": api_key,
+                "config": deepcopy(quote["legacy_config"]),
+                "retention_enabled": False,
+            })
+            run_id = str(uuid.uuid4())
+            owner_token = secrets.token_urlsafe(48)
+            run = {
+                "run_id": run_id,
+                "owner_token": owner_token,
+                "session_id": start_result["session_id"],
+                "quote": deepcopy(quote),
+                "status": "running",
+                "created_at": utc_now(),
+                "expires_at": _expires(24 * 60 * 60),
+                "events": [{
+                    "id": 1,
+                    "type": "status",
+                    "payload": {
+                        "status": "running",
+                        "phase": "executing",
+                        "completed": 0,
+                        "total": quote["estimate"]["requests"],
+                        "successful": 0,
+                        "errors": 0,
+                        "cancelled": 0,
+                        "pending": quote["estimate"]["requests"],
+                        "in_flight": 0,
+                        "http_attempts": 0,
+                        "retries": 0,
+                    },
+                }],
+                "last_snapshot": None,
+                "report": None,
+            }
+            with self.lock:
+                self.runs[run_id] = run
+                self.idempotency[idempotency_key] = run_id
+            return self._create_response(run)
+        except BaseException as error:
+            pending.error = error
+            raise
+        finally:
+            with self.lock:
+                self._pending_runs.pop(idempotency_key, None)
+                pending.event.set()
 
     def events(self, run_id: str, owner_token: str, after: int, app_state: Any) -> list[dict[str, Any]]:
         deadline = time.monotonic() + 1.0

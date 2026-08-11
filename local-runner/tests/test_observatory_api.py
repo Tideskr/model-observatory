@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import sys
 import tempfile
+import shutil
 import threading
 import time
 import unittest
@@ -183,11 +184,48 @@ class ObservatoryApiTests(unittest.TestCase):
         self.assertEqual(failed_report["summary"]["error_summary"][0]["http_status"], 401)
         self.assertEqual(failed_report["summary"]["error_summary"][0]["attempts"], 2)
 
+    def test_idempotency_key_is_single_flight_under_concurrency(self) -> None:
+        api = ObservatoryApi()
+        quote = api.issue_quote(quote_body())
+        body = {
+            "quote_token": quote["quote_token"],
+            "api_key": "temporary-key",
+            "consent": {"disclosure_version": "remote-normal-v1"},
+        }
+        starter_calls = 0
+        starter_lock = threading.Lock()
+
+        def starter(_payload: dict[str, object]) -> dict[str, str]:
+            nonlocal starter_calls
+            with starter_lock:
+                starter_calls += 1
+            time.sleep(0.1)
+            return {"session_id": "concurrent-session"}
+
+        results: list[dict[str, object]] = []
+        errors: list[BaseException] = []
+
+        def create() -> None:
+            try:
+                results.append(api.create_run(body, "concurrent-idempotency-key", starter))
+            except BaseException as error:  # pragma: no cover - assertion below reports unexpected failures
+                errors.append(error)
+
+        threads = [threading.Thread(target=create) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+        self.assertFalse(errors)
+        self.assertEqual(starter_calls, 1)
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0]["run_id"], results[1]["run_id"])
+
 
 class RunnerHttpTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp = tempfile.TemporaryDirectory()
-        self.server = create_server(port=0, runs_root=self.temp.name)
+        self.temp_root = Path(tempfile.mkdtemp(prefix="runner-tests-", dir=ROOT.parent))
+        self.server = create_server(port=0, runs_root=self.temp_root)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base_url = f"http://127.0.0.1:{self.server.server_address[1]}"
@@ -196,7 +234,14 @@ class RunnerHttpTests(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=5)
-        self.temp.cleanup()
+        for _attempt in range(5):
+            try:
+                shutil.rmtree(self.temp_root)
+                break
+            except PermissionError:
+                time.sleep(0.1)
+        else:
+            shutil.rmtree(self.temp_root, ignore_errors=True)
 
     def request(
         self,
@@ -239,6 +284,10 @@ class RunnerHttpTests(unittest.TestCase):
             self.assertTrue(body["quote_token"])
 
     def test_real_detector_run_reaches_compatible_report(self) -> None:
+        try:
+            (self.temp_root / "detector").mkdir(parents=True, exist_ok=True)
+        except PermissionError as error:
+            self.skipTest(f"detector integration requires a writable nested run directory: {error}")
         upstream = ThreadingHTTPServer(("127.0.0.1", 0), MockResponsesHandler)
         upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
         upstream_thread.start()

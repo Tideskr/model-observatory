@@ -6,16 +6,33 @@ readonly compose_file="${MODEL_OBSERVATORY_COMPOSE_FILE:-compose.production.yml}
 readonly env_file="${MODEL_OBSERVATORY_ENV_FILE:-.env.production}"
 
 cd "$app_dir"
+readonly previous_commit="$(git rev-parse HEAD)"
 git fetch --prune origin main
 git merge --ff-only origin/main
-docker compose --env-file "$env_file" -f "$compose_file" up -d --build --remove-orphans
 
+rollback() {
+  printf 'Deployment failed; rolling back to %s\n' "$previous_commit" >&2
+  git reset --hard "$previous_commit"
+  docker compose --env-file "$env_file" -f "$compose_file" up -d --build --remove-orphans || true
+}
+
+if ! docker compose --env-file "$env_file" -f "$compose_file" up -d --build --remove-orphans; then
+  docker compose --env-file "$env_file" -f "$compose_file" ps || true
+  rollback
+  exit 1
+fi
+
+healthy=0
 for _attempt in $(seq 1 30); do
   if curl --fail --silent --show-error --max-time 3 http://127.0.0.1:18787/api/v1/health >/dev/null; then
-    exit 0
+    healthy=1
+    break
   fi
   sleep 2
 done
 
-docker compose --env-file "$env_file" -f "$compose_file" ps
-exit 1
+if [ "$healthy" -ne 1 ]; then
+  docker compose --env-file "$env_file" -f "$compose_file" ps || true
+  rollback
+  exit 1
+fi

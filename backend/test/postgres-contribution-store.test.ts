@@ -64,6 +64,30 @@ test('donation scheduler repair migration permits idle scheduling and normalizes
   assert.match(migration, /donations_errors_array CHECK \(jsonb_typeof\(errors\) = 'array'\)/)
 })
 
+test('cycle creation rechecks donation status while holding the donation row lock', async () => {
+  const queries: string[] = []
+  const client = {
+    query: async (sql: string) => {
+      queries.push(sql)
+      if (sql.includes('SELECT id FROM donations')) return { rowCount: 0, rows: [] }
+      return { rowCount: 0, rows: [] }
+    },
+    release: () => undefined,
+  }
+  const pool = { connect: async () => client } as unknown as DatabasePool
+  const store = new PostgresContributionStore(pool)
+
+  await assert.rejects(() => store.createDonationCycle({
+    id: '10000000-0000-4000-8000-000000000010', donationId: '10000000-0000-4000-8000-000000000011',
+    status: 'running', attribution: 'verified', reservedCostUsd: 1, actualCostUsd: 0,
+    createdAt: new Date().toISOString(), completedAt: null,
+  }, [], 'worker-test'))
+  const lockQuery = queries.find((sql) => sql.includes('SELECT id FROM donations'))
+  assert.ok(lockQuery)
+  assert.match(lockQuery, /status IN \('quarantined','active'\)/)
+  assert.ok(queries.includes('ROLLBACK'))
+})
+
 test('model confidence migration derives probability rather than binary pass rate', async () => {
   const migration = await readFile(resolve(process.cwd(), 'migrations/009_model_probability_confidence.sql'), 'utf8')
   assert.match(migration, /ADD COLUMN model_probability/)

@@ -39,6 +39,7 @@ export interface ProviderRegistry {
   document: ProviderRegistryDocument
   contentSha256: string
   findByHostname(hostname: string): RegistryProvider | null
+  findActiveByHostname(hostname: string): RegistryProvider | null
   findGroup(providerSlug: string, groupId: string): RegistryGroup | null
 }
 
@@ -139,11 +140,18 @@ export function parseProviderRegistry(value: unknown): ProviderRegistryDocument 
 
 export function createProviderRegistry(document: ProviderRegistryDocument): ProviderRegistry {
   const byHostname = new Map<string, RegistryProvider>()
-  for (const provider of document.providers) for (const domain of provider.domains) byHostname.set(domain.hostname, provider)
+  const activeByHostname = new Map<string, RegistryProvider>()
+  for (const provider of document.providers) {
+    for (const domain of provider.domains) {
+      byHostname.set(domain.hostname, provider)
+      if (domain.status === 'active') activeByHostname.set(domain.hostname, provider)
+    }
+  }
   return {
     document,
     contentSha256: createHash('sha256').update(JSON.stringify(document)).digest('hex'),
     findByHostname(value) { return byHostname.get(hostname(value, 'hostname')) ?? null },
+    findActiveByHostname(value) { return activeByHostname.get(hostname(value, 'hostname')) ?? null },
     findGroup(providerSlug, groupId) { return document.providers.find((item) => item.slug === providerSlug)?.groups.find((item) => item.id === groupId) ?? null },
   }
 }
