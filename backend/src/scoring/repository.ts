@@ -52,7 +52,7 @@ export async function saveScoringRelease(pool: DatabasePool, seed: ScoringReleas
       await client.query(
         `INSERT INTO scoring_baseline_cells
          (release_id,probe_id,profile,categories,raw_counts,fitted_parameters,quality) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [seed.id, cell.probeId, cell.profile, cell.categories, cell.rawCounts, cell.fittedParameters, cell.quality],
+        [seed.id, cell.probeId, cell.profile, JSON.stringify(cell.categories), cell.rawCounts, cell.fittedParameters, cell.quality],
       )
     }
     for (const calibration of seed.calibrations) {
