@@ -24,6 +24,7 @@ const navigation: NavItem[] = [
 function usePageLabel() {
   const { pathname } = useLocation()
   if (pathname.startsWith('/providers/')) return '提供商详情'
+  if (pathname.startsWith('/admin/registry')) return 'Registry 管理'
   return (
     navigation.find((item) => (item.end ? pathname === item.to : pathname.startsWith(item.to)))
       ?.label ?? ''

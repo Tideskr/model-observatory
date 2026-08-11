@@ -77,6 +77,10 @@ docker compose --env-file .env.production -f compose.production.yml up -d --buil
 
 `.github/workflows/deploy.yml` 会在 `main` 分支每次提交后通过受限 SSH 密钥触发生产部署。VPS 上的固定入口串行执行 `deploy/server-deploy.sh`，仅允许快进到远端 `main`，重新构建 Compose 服务并等待健康检查通过。
 
+仅修改 `registry/providers.json` 的提交会走轻量发布：部署脚本不重建镜像或重启 API/worker，只校验并同步 Registry，运行中的进程通过 PostgreSQL 通知切换快照。包含其他文件的提交仍执行完整部署。
+
+可视化 Registry 管理入口为 `/admin/registry`。创建一个仅安装到本仓库、具备 `Contents: write` 权限的 GitHub App，并将回调地址设置为 `https://check.skr.moe/api/v1/admin/auth/github/callback`；然后配置 `deploy/.env.production.example` 中的 `GITHUB_ADMIN_*`、数字形式的 `ADMIN_GITHUB_USER_IDS` 和随机 `ADMIN_SESSION_SECRET`。当前白名单为 `chen-006`、`hanlinwenyuan`、`Tideskr`（管理员）和 `imNachoNeko`。Web 发布会先生成 Git 提交，再热激活相同内容。
+
 ## 目录
 
 ```text

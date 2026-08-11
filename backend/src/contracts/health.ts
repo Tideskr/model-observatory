@@ -8,6 +8,7 @@ export const HealthResponseSchema = Type.Intersect([
       status: Type.Literal('ok'),
       service: Type.Literal('model-observatory-api'),
       version: Type.String(),
+      registry_sha256: Type.String({ pattern: '^[a-f0-9]{64}$' }),
     },
     { additionalProperties: false },
   ),

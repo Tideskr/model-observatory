@@ -143,7 +143,8 @@ function issueUrl(config: AppConfig, proposal: RegistryProposalRequest, contentS
 }
 
 function donationResponse(record: DonationRecord, services: AppServices) {
-  const provider = services.providerRegistry.document.providers.find((item) => item.slug === record.providerSlug)
+  const registry = services.providerRegistry.snapshot()
+  const provider = registry.document.providers.find((item) => item.slug === record.providerSlug)
   const group = provider?.groups.find((item) => item.id === record.groupId)
   if (!provider || !group) throw new AppError(500, 'provider_registry_drift', 'The donation references an unavailable provider group.')
   const remaining = Math.max(0, record.constraints.quota_usd - record.quotaSpentUsd - record.quotaReservedUsd)
@@ -179,8 +180,9 @@ export const contributionRoutes: FastifyPluginAsyncTypebox<ContributionRouteOpti
       config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
     },
     async (request) => {
+      const registry = services.providerRegistry.snapshot()
       const target = normalizeTarget(request.body.base_url)
-      const provider = services.providerRegistry.findActiveByHostname(target.hostname)
+      const provider = registry.findActiveByHostname(target.hostname)
       if (!provider) throw new AppError(404, 'provider_not_registered', 'This API hostname is not registered to a provider.')
       if (provider.groups.length === 0) throw new AppError(409, 'provider_groups_unconfigured', 'This provider does not have any configured detection groups yet.')
       if (request.body.group_id && !provider.groups.some((item) => item.id === request.body.group_id)) {
@@ -201,8 +203,8 @@ export const contributionRoutes: FastifyPluginAsyncTypebox<ContributionRouteOpti
         provider: { slug: provider.slug, name: provider.name, kind: provider.kind },
         groups: provider.groups.map((group) => {
           const estimate = donationModelEstimate({
-            input_per_million: services.providerRegistry.document.pricing.input_per_million_usd,
-            output_per_million: services.providerRegistry.document.pricing.output_per_million_usd,
+            input_per_million: registry.document.pricing.input_per_million_usd,
+            output_per_million: registry.document.pricing.output_per_million_usd,
             multiplier: group.multiplier,
           })
           return {
@@ -230,8 +232,9 @@ export const contributionRoutes: FastifyPluginAsyncTypebox<ContributionRouteOpti
       config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
     },
     async (request, reply) => {
+      const registry = services.providerRegistry.snapshot()
       const quote = verifyDonationQuote(request.body.quote_token, config.quoteSigningSecret)
-      const provider = services.providerRegistry.document.providers.find((item) => item.slug === quote.providerSlug)
+      const provider = registry.document.providers.find((item) => item.slug === quote.providerSlug)
       const group = provider?.groups.find((item) => item.id === request.body.group_id)
       if (!provider || !group) throw new AppError(409, 'provider_registry_changed', 'The provider group changed after this quote was issued. Request a new quote.')
       const acceptedAt = new Date(request.body.consent.accepted_at).getTime()

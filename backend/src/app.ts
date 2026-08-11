@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import cors from '@fastify/cors'
+import cookie from '@fastify/cookie'
 import helmet from '@fastify/helmet'
 import rateLimit from '@fastify/rate-limit'
 import swagger from '@fastify/swagger'
@@ -13,6 +14,7 @@ import { healthRoutes } from './routes/health.js'
 import { privateRunRoutes } from './routes/private-runs.js'
 import { publicRoutes } from './routes/public.js'
 import { contributionRoutes } from './routes/contributions.js'
+import { adminRoutes } from './routes/admin.js'
 import { createServices, type AppServices } from './services.js'
 import { loadProviderRegistry } from './registry/catalog.js'
 import { resolve } from 'node:path'
@@ -30,10 +32,6 @@ function sendFrontendIndex(reply: FastifyReply) {
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
   const config = options.config ?? loadConfig()
-  const services = options.services ?? createServices(
-    config,
-    await loadProviderRegistry(resolve(process.cwd(), config.providerRegistryPath)),
-  )
   const app = Fastify({
     logger:
       options.logger === false
@@ -55,12 +53,20 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     trustProxy: config.trustProxy,
     genReqId: () => randomUUID(),
   }).withTypeProvider<TypeBoxTypeProvider>()
+  const services = options.services ?? await createServices(
+    config,
+    config.databaseUrl === 'memory:'
+      ? await loadProviderRegistry(resolve(process.cwd(), config.providerRegistryPath))
+      : undefined,
+    app.log,
+  )
 
+  await app.register(cookie)
   await app.register(helmet, { contentSecurityPolicy: false })
   await app.register(cors, {
     origin: config.publicOrigin,
     credentials: false,
-    allowedHeaders: ['content-type', 'authorization', 'idempotency-key', 'last-event-id'],
+    allowedHeaders: ['content-type', 'authorization', 'idempotency-key', 'last-event-id', 'x-csrf-token'],
   })
   await app.register(rateLimit, {
     max: 120,
@@ -99,7 +105,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   })
 
   const credentialCleanup = setInterval(() => {
-    void Promise.all([services.credentialVault.purgeExpired(), services.runStore.purgeExpired()])
+    void Promise.all([services.credentialVault.purgeExpired(), services.runStore.purgeExpired(), services.adminService?.purgeExpiredSessions()])
       .catch((error: unknown) => app.log.error({ err: error }, 'retention cleanup failed'))
   }, 60_000)
   credentialCleanup.unref()
@@ -108,10 +114,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     await services.close()
   })
 
-  await app.register(healthRoutes, { prefix: '/api/v1' })
+  await app.register(healthRoutes, { prefix: '/api/v1', providerRegistry: services.providerRegistry })
   await app.register(publicRoutes, { prefix: '/api/v1', repository: services.publicRepository })
   await app.register(privateRunRoutes, { prefix: '/api/v1', config, services })
   await app.register(contributionRoutes, { prefix: '/api/v1', config, services })
+  await app.register(adminRoutes, { prefix: '/api/v1', config, services })
   if (config.frontendDistDir) {
     await app.register(fastifyStatic, {
       root: config.frontendDistDir,

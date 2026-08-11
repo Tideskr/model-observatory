@@ -4,6 +4,21 @@ import { isAbsolute } from 'node:path'
 
 export type AppEnvironment = 'development' | 'test' | 'production'
 
+export interface GitHubAdminConfig {
+  appId: string
+  clientId: string
+  clientSecret: string
+  installationId: number
+  privateKey: string
+  allowedUserIds: ReadonlySet<number>
+  sessionSecret: string
+  owner: string
+  repository: string
+  branch: string
+  registryPath: string
+  callbackUrl: string
+}
+
 export interface AppConfig {
   appEnv: AppEnvironment
   host: string
@@ -24,6 +39,7 @@ export interface AppConfig {
   trustProxy: false | string | string[] | number
   frontendDistDir: string | null
   providerRegistryPath: string
+  githubAdmin: GitHubAdminConfig | null
 }
 
 function parseEnvironment(value: string | undefined): AppEnvironment {
@@ -71,6 +87,54 @@ function repositoryUrl(value: string | undefined): string {
   return `${url.origin}/${parts.join('/')}`
 }
 
+function githubAdminConfig(
+  environment: NodeJS.ProcessEnv,
+  configuredRepositoryUrl: string,
+  publicOrigin: string,
+): GitHubAdminConfig | null {
+  const names = [
+    'GITHUB_ADMIN_APP_ID', 'GITHUB_ADMIN_CLIENT_ID', 'GITHUB_ADMIN_CLIENT_SECRET',
+    'GITHUB_ADMIN_INSTALLATION_ID', 'GITHUB_ADMIN_PRIVATE_KEY_BASE64',
+    'ADMIN_GITHUB_USER_IDS', 'ADMIN_SESSION_SECRET',
+  ] as const
+  const present = names.filter((name) => Boolean(environment[name]))
+  if (present.length === 0) return null
+  if (present.length !== names.length) {
+    throw new Error(`GitHub admin configuration is incomplete; missing ${names.filter((name) => !environment[name]).join(', ')}`)
+  }
+  const installationId = Number(environment['GITHUB_ADMIN_INSTALLATION_ID'])
+  if (!Number.isSafeInteger(installationId) || installationId <= 0) throw new Error('GITHUB_ADMIN_INSTALLATION_ID must be a positive integer')
+  const allowedUserIds = new Set(
+    environment['ADMIN_GITHUB_USER_IDS']!.split(',').map((item) => Number(item.trim())),
+  )
+  if (!allowedUserIds.size || [...allowedUserIds].some((item) => !Number.isSafeInteger(item) || item <= 0)) {
+    throw new Error('ADMIN_GITHUB_USER_IDS must contain comma-separated positive integers')
+  }
+  const sessionSecret = environment['ADMIN_SESSION_SECRET']!
+  if (sessionSecret.length < 32) throw new Error('ADMIN_SESSION_SECRET must contain at least 32 characters')
+  let privateKey: string
+  try { privateKey = Buffer.from(environment['GITHUB_ADMIN_PRIVATE_KEY_BASE64']!, 'base64').toString('utf8') }
+  catch { throw new Error('GITHUB_ADMIN_PRIVATE_KEY_BASE64 must contain a base64-encoded private key') }
+  if (!privateKey.includes('BEGIN') || !privateKey.includes('PRIVATE KEY')) {
+    throw new Error('GITHUB_ADMIN_PRIVATE_KEY_BASE64 must contain a base64-encoded private key')
+  }
+  const repository = new URL(configuredRepositoryUrl).pathname.split('/').filter(Boolean)
+  return {
+    appId: environment['GITHUB_ADMIN_APP_ID']!,
+    clientId: environment['GITHUB_ADMIN_CLIENT_ID']!,
+    clientSecret: environment['GITHUB_ADMIN_CLIENT_SECRET']!,
+    installationId,
+    privateKey,
+    allowedUserIds,
+    sessionSecret,
+    owner: repository[0]!,
+    repository: repository[1]!,
+    branch: 'main',
+    registryPath: 'registry/providers.json',
+    callbackUrl: `${publicOrigin}/api/v1/admin/auth/github/callback`,
+  }
+}
+
 function validTrustedAddress(item: string): boolean {
   const [address, prefix, extra] = item.split('/')
   const family = isIP(address ?? '')
@@ -109,6 +173,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     throw new Error('PUBLIC_ORIGIN must use http or https')
   }
 
+  const configuredRepositoryUrl = repositoryUrl(environment['REPOSITORY_URL'])
   return {
     appEnv,
     host: environment['HOST'] ?? '127.0.0.1',
@@ -125,9 +190,10 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     runRetentionHours: 24,
     maxRunRequests: 500,
     scoringReleaseId: environment['SCORING_RELEASE_ID'] ?? 'stage-c-trusted-fingerprint-v4',
-    repositoryUrl: repositoryUrl(environment['REPOSITORY_URL']),
+    repositoryUrl: configuredRepositoryUrl,
     trustProxy: trustProxy(environment['TRUST_PROXY']),
     frontendDistDir: frontendDistDir(environment['FRONTEND_DIST_DIR']),
     providerRegistryPath: environment['PROVIDER_REGISTRY_PATH'] ?? '../registry/providers.json',
+    githubAdmin: githubAdminConfig(environment, configuredRepositoryUrl, origin.origin),
   }
 }

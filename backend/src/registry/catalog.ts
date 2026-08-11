@@ -38,6 +38,7 @@ export interface ProviderRegistryDocument {
 export interface ProviderRegistry {
   document: ProviderRegistryDocument
   contentSha256: string
+  snapshot(): ProviderRegistry
   findByHostname(hostname: string): RegistryProvider | null
   findActiveByHostname(hostname: string): RegistryProvider | null
   findGroup(providerSlug: string, groupId: string): RegistryGroup | null
@@ -147,13 +148,15 @@ export function createProviderRegistry(document: ProviderRegistryDocument): Prov
       if (domain.status === 'active') activeByHostname.set(domain.hostname, provider)
     }
   }
-  return {
+  const registry: ProviderRegistry = {
     document,
     contentSha256: createHash('sha256').update(JSON.stringify(document)).digest('hex'),
+    snapshot() { return registry },
     findByHostname(value) { return byHostname.get(hostname(value, 'hostname')) ?? null },
     findActiveByHostname(value) { return activeByHostname.get(hostname(value, 'hostname')) ?? null },
     findGroup(providerSlug, groupId) { return document.providers.find((item) => item.slug === providerSlug)?.groups.find((item) => item.id === groupId) ?? null },
   }
+  return registry
 }
 
 export async function loadProviderRegistry(path: string): Promise<ProviderRegistry> {

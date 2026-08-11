@@ -18,6 +18,7 @@ test('health endpoint returns versioned metadata and security headers', async (c
     status: 'ok',
     service: 'model-observatory-api',
     version: '0.1.0',
+    registry_sha256: response.json().registry_sha256,
     generated_at: response.json().generated_at,
     data_version: 'observatory-data-v1',
     method_version: 'legacy-compatible-v1',

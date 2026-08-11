@@ -102,7 +102,8 @@ export class DonationScheduler {
   async scheduleOnce(): Promise<boolean> {
     const donation = await this.#services.contributionStore.claimDueDonation(this.#workerId, this.#leaseSeconds)
     if (!donation) return false
-    const provider = this.#services.providerRegistry.document.providers.find((item) => item.slug === donation.providerSlug)
+    const registry = this.#services.providerRegistry.snapshot()
+    const provider = registry.document.providers.find((item) => item.slug === donation.providerSlug)
     const group = provider?.groups.find((item) => item.id === donation.groupId)
     if (!provider || !group) {
       await this.#services.contributionStore.updateDonationFromWorker(donation.id, this.#workerId, {
@@ -140,7 +141,7 @@ export class DonationScheduler {
           return true
         }
       }
-      const pricing = this.#services.providerRegistry.document.pricing
+      const pricing = registry.document.pricing
       const estimate = donationModelEstimate({ input_per_million: pricing.input_per_million_usd, output_per_million: pricing.output_per_million_usd, multiplier: group.multiplier })
       const reserve = Number((estimate.maximum_cost_usd * group.models.length).toFixed(6))
       const remaining = donation.constraints.quota_usd - donation.quotaSpentUsd
@@ -200,14 +201,15 @@ export class DonationScheduler {
 
   async reconcileOnce(): Promise<boolean> {
     let worked = false
+    const registry = this.#services.providerRegistry.snapshot()
     const pending = await this.#services.contributionStore.listPendingDonationRuns()
     for (const link of pending) {
       const report = await this.#services.runStore.getReport(link.privateRunId)
       if (!report?.terminal) continue
-      const provider = this.#services.providerRegistry.document.providers.find((item) => item.slug === link.providerSlug)
+      const provider = registry.document.providers.find((item) => item.slug === link.providerSlug)
       const group = provider?.groups.find((item) => item.id === link.groupId)
       if (!group) continue
-      const pricing = this.#services.providerRegistry.document.pricing
+      const pricing = registry.document.pricing
       const fallback = donationModelEstimate({ input_per_million: pricing.input_per_million_usd, output_per_million: pricing.output_per_million_usd, multiplier: group.multiplier }).maximum_cost_usd
       await this.#services.contributionStore.completeDonationRun(link.privateRunId, {
         outcome: runOutcome(report), successfulRequests: number(report.summary['successful_requests']),

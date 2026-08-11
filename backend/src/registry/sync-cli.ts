@@ -9,7 +9,10 @@ if (config.databaseUrl === 'memory:') throw new Error('Registry sync requires Po
 const pool = createDatabasePool(config)
 try {
   const registry = await loadProviderRegistry(resolve(process.cwd(), config.providerRegistryPath))
-  await syncProviderRegistry(pool, registry)
+  await syncProviderRegistry(pool, registry, {
+    gitCommitSha: process.env['REGISTRY_GIT_COMMIT'] ?? null,
+    activatedBy: process.env['REGISTRY_ACTOR'] ?? 'gitops',
+  })
   process.stdout.write(`Provider registry synced: ${registry.contentSha256}\n`)
 } finally {
   await pool.end()

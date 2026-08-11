@@ -16,6 +16,9 @@ import { PublicDataProvider } from './api/publicData'
 const DocsPage = lazy(() =>
   import('./pages/DocsPage').then((module) => ({ default: module.DocsPage })),
 )
+const AdminRegistryPage = lazy(() =>
+  import('./pages/AdminRegistryPage').then((module) => ({ default: module.AdminRegistryPage })),
+)
 
 export default function App() {
   return (
@@ -28,6 +31,10 @@ export default function App() {
             <Route path="private" element={<PrivateCheckPage />} />
             <Route path="donate" element={<DonatePage />} />
             <Route path="registry" element={<RegistryPage />} />
+            <Route
+              path="admin/registry"
+              element={<Suspense fallback={<div className="admin-loading">正在加载管理界面…</div>}><AdminRegistryPage /></Suspense>}
+            />
             <Route
               path="docs"
               element={
