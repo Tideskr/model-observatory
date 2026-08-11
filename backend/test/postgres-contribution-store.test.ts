@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { test } from 'node:test'
 import type { DatabasePool } from '../src/db/connection.js'
 import { PostgresContributionStore } from '../src/store/postgres-contribution-store.js'
@@ -20,4 +22,44 @@ test('claiming a donation does not expose an ambiguous id from the candidate CTE
   assert.match(queries[0]!.sql, /WHERE d\.id=candidate\.donation_id RETURNING/)
   assert.doesNotMatch(queries[0]!.sql, /SELECT id FROM donations/)
   assert.deepEqual(queries[0]!.values, ['worker-test', 60])
+})
+
+test('donation worker updates encode error lists as JSON instead of PostgreSQL arrays', async () => {
+  const now = new Date()
+  const row = {
+    id: '10000000-0000-4000-8000-000000000001', quote_id: '10000000-0000-4000-8000-000000000002',
+    request_digest: 'a'.repeat(64), idempotency_key: 'postgres-error-json-test', kind: 'api', status: 'quarantined',
+    target_origin: 'https://api.example.com', target_base_url: 'https://api.example.com/v1', target_hostname: 'api.example.com',
+    provider_slug: 'example', group_id: 'default', detected_group_id: null, group_attribution: 'pending', phase: 'identity_probe',
+    progress_current: 0, progress_total: 128, current_model: null, next_run_at: now, last_checked_at: null,
+    quota_spent_usd: '0', quota_reserved_usd: '0', errors: {}, constraints: { quota_usd: 20, concurrency: 4, interval_minutes: 240, expires_in_days: 30 },
+    credential_handle: '10000000-0000-4000-8000-000000000003', credential_fingerprint_tail: '0123456789',
+    revocation_token_hash: 'b'.repeat(64), disclosure_version: 'donation-api-v1', created_at: now,
+    expires_at: new Date(now.getTime() + 86_400_000), revoked_at: null,
+  }
+  const queries: Array<{ sql: string; values: unknown[] | undefined }> = []
+  const pool = {
+    query: async (sql: string, values?: unknown[]) => {
+      queries.push({ sql, values })
+      return { rows: [row] }
+    },
+  } as unknown as DatabasePool
+  const error = {
+    stage: 'scheduler', code: 'scheduler_failed', message: 'Failed to create a cycle.', model: null,
+    http_status: null, retryable: true, at: now.toISOString(),
+  }
+
+  const store = new PostgresContributionStore(pool)
+  const updated = await store.updateDonationFromWorker(row.id, 'worker-test', { errors: [error] }, true)
+
+  assert.deepEqual(updated.errors, [])
+  assert.equal(queries.length, 2)
+  assert.equal(queries[1]!.values?.[13], JSON.stringify([error]))
+})
+
+test('donation scheduler repair migration permits idle scheduling and normalizes error details', async () => {
+  const migration = await readFile(resolve(process.cwd(), 'migrations/008_donation_scheduler_repairs.sql'), 'utf8')
+  assert.match(migration, /ALTER COLUMN next_run_at DROP NOT NULL/)
+  assert.match(migration, /jsonb_typeof\(errors\) IS DISTINCT FROM 'array'/)
+  assert.match(migration, /donations_errors_array CHECK \(jsonb_typeof\(errors\) = 'array'\)/)
 })

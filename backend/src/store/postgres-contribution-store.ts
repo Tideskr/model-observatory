@@ -66,6 +66,10 @@ function numberValue(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
+function donationErrorsJson(errors: DonationError[]): string {
+  return JSON.stringify(errors)
+}
+
 function mapDonation(row: DonationRow): DonationRecord {
   return {
     id: row.id, quoteId: row.quote_id, requestDigest: row.request_digest, idempotencyKey: row.idempotency_key,
@@ -74,7 +78,8 @@ function mapDonation(row: DonationRow): DonationRecord {
     detectedGroupId: row.detected_group_id, groupAttribution: row.group_attribution, phase: row.phase,
     progressCurrent: row.progress_current, progressTotal: row.progress_total, currentModel: row.current_model,
     nextRunAt: row.next_run_at?.toISOString() ?? null, lastCheckedAt: row.last_checked_at?.toISOString() ?? null,
-    quotaSpentUsd: Number(row.quota_spent_usd), quotaReservedUsd: Number(row.quota_reserved_usd), errors: row.errors,
+    quotaSpentUsd: Number(row.quota_spent_usd), quotaReservedUsd: Number(row.quota_reserved_usd),
+    errors: Array.isArray(row.errors) ? row.errors : [],
     constraints: row.constraints, credentialHandle: row.credential_handle,
     credentialFingerprintTail: row.credential_fingerprint_tail, revocationTokenHash: row.revocation_token_hash,
     disclosureVersion: row.disclosure_version, createdAt: row.created_at.toISOString(),
@@ -133,7 +138,7 @@ export class PostgresContributionStore implements ContributionStore {
           record.disclosureVersion, record.createdAt, record.expiresAt, record.revokedAt,
           record.providerSlug, record.groupId, record.detectedGroupId, record.groupAttribution, record.phase,
           record.progressCurrent, record.progressTotal, record.currentModel, record.nextRunAt, record.lastCheckedAt,
-          record.quotaSpentUsd, record.quotaReservedUsd, record.errors],
+          record.quotaSpentUsd, record.quotaReservedUsd, donationErrorsJson(record.errors)],
       )
       let output = inserted.rows[0]
       let created = true
@@ -220,7 +225,7 @@ export class PostgresContributionStore implements ContributionStore {
        WHERE id=$1 AND worker_id=$2 AND lease_expires_at>now() RETURNING ${donationColumns}`,
       [id, workerId, next.status, next.detectedGroupId, next.groupAttribution, next.phase, next.progressCurrent,
         next.progressTotal, next.currentModel, next.nextRunAt, next.lastCheckedAt, next.quotaSpentUsd,
-        next.quotaReservedUsd, next.errors, releaseLease],
+        next.quotaReservedUsd, donationErrorsJson(next.errors), releaseLease],
     )
     if (!result.rows[0]) throw new AppError(409, 'donation_lease_lost', 'The donation worker lease was lost.')
     return mapDonation(result.rows[0])
@@ -354,7 +359,7 @@ export class PostgresContributionStore implements ContributionStore {
          phase=CASE WHEN $2 THEN 'active' ELSE 'model_unavailable' END,last_checked_at=now(),
          next_run_at=CASE WHEN $2 THEN $3 ELSE now()+interval '30 minutes' END,
          quota_spent_usd=quota_spent_usd+$4,quota_reserved_usd=0,errors=$5,current_model=NULL WHERE id=$1`,
-        [donationId, available, nextRunAt, spentUsd, errors],
+        [donationId, available, nextRunAt, spentUsd, donationErrorsJson(errors)],
       )
       const keys = new Set(runs.rows.map((item) => `${item.provider_slug}\0${item.group_id}\0${item.model}`))
       for (const key of keys) {
