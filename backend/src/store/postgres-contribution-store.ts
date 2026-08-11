@@ -195,14 +195,14 @@ export class PostgresContributionStore implements ContributionStore {
   async claimDueDonation(workerId: string, leaseSeconds: number): Promise<DonationRecord | null> {
     const result = await this.pool.query<DonationRow>(
       `WITH candidate AS (
-         SELECT id FROM donations
+         SELECT id AS donation_id FROM donations
          WHERE status IN ('quarantined','active') AND next_run_at <= now() AND expires_at > now()
            AND (lease_expires_at IS NULL OR lease_expires_at <= now())
          ORDER BY next_run_at,created_at FOR UPDATE SKIP LOCKED LIMIT 1
        )
        UPDATE donations d SET worker_id=$1,lease_expires_at=now()+($2::text || ' seconds')::interval,
          phase=CASE WHEN d.status='quarantined' THEN 'identity_probe' ELSE 'scheduling' END
-       FROM candidate WHERE d.id=candidate.id RETURNING ${donationColumns}`,
+       FROM candidate WHERE d.id=candidate.donation_id RETURNING ${donationColumns}`,
       [workerId, leaseSeconds],
     )
     return result.rows[0] ? mapDonation(result.rows[0]) : null
