@@ -9,6 +9,14 @@
       "slug": "congee-pro",
       "name": "粥 Pro",
       "kind": "relay",
+      "domains": [
+        {
+          "hostname": "congee.pro",
+          "role": "primary",
+          "status": "active",
+          "default_base_path": "/v1"
+        }
+      ],
       "group_detection": {
         "probe_model": "__api_authenticator_group_probe__"
       },
@@ -25,48 +33,51 @@
             "gpt-5.6-terra"
           ]
         }
-      ],
-      "domains": [
-        {
-          "hostname": "congee.pro",
-          "role": "primary",
-          "default_base_path": "/v1",
-          "status": "active"
-        }
       ]
     },
     {
       "slug": "shuai-api",
       "name": "帅 API",
       "kind": "relay",
-      "group_detection": {
-        "probe_model": "__api_authenticator_group_probe__"
-      },
-      "groups": [],
       "domains": [
         {
           "hostname": "api.shuaiapi.com",
           "role": "primary",
-          "default_base_path": "/v1",
-          "status": "active"
+          "status": "active",
+          "default_base_path": "/v1"
         },
         {
           "hostname": "oai.sb",
           "role": "alias",
-          "default_base_path": "/v1",
-          "status": "active"
+          "status": "active",
+          "default_base_path": "/v1"
         },
         {
           "hostname": "api.oai.sb",
           "role": "alias",
-          "default_base_path": "/v1",
-          "status": "active"
+          "status": "active",
+          "default_base_path": "/v1"
         },
         {
           "hostname": "cdn.shuaiapi.com",
           "role": "alias",
-          "default_base_path": "/v1",
-          "status": "active"
+          "status": "active",
+          "default_base_path": "/v1"
+        }
+      ],
+      "group_detection": {
+        "probe_model": "__api_authenticator_group_probe__"
+      },
+      "groups": [
+        {
+          "id": "gpt-bomb",
+          "name": "【GPT】plus/team炸弹车混合分组",
+          "aliases": [],
+          "multiplier": 0.08,
+          "models": [
+            "gpt-5.6-sol",
+            "gpt-5.6-terra"
+          ]
         }
       ]
     },
@@ -74,110 +85,110 @@
       "slug": "ai-hub",
       "name": "AI Hub",
       "kind": "relay",
-      "group_detection": {
-        "probe_model": "__api_authenticator_group_probe__"
-      },
-      "groups": [],
       "domains": [
         {
           "hostname": "aihub.dog",
           "role": "primary",
-          "default_base_path": "/v1",
-          "status": "active"
+          "status": "active",
+          "default_base_path": "/v1"
         },
         {
           "hostname": "aihub.top",
           "role": "alias",
-          "default_base_path": "/v1",
-          "status": "active"
+          "status": "active",
+          "default_base_path": "/v1"
         },
         {
           "hostname": "api.aihub.top",
           "role": "alias",
-          "default_base_path": "/v1",
-          "status": "active"
+          "status": "active",
+          "default_base_path": "/v1"
         }
-      ]
+      ],
+      "group_detection": {
+        "probe_model": "__api_authenticator_group_probe__"
+      },
+      "groups": []
     },
     {
       "slug": "xingchen",
       "name": "君の星辰",
       "kind": "relay",
-      "group_detection": {
-        "probe_model": "__api_authenticator_group_probe__"
-      },
-      "groups": [],
       "domains": [
         {
           "hostname": "ai.centos.hk",
           "role": "primary",
-          "default_base_path": "/v1",
-          "status": "active"
+          "status": "active",
+          "default_base_path": "/v1"
         },
         {
           "hostname": "api.centos.hk",
           "role": "alias",
-          "default_base_path": "/v1",
-          "status": "active"
+          "status": "active",
+          "default_base_path": "/v1"
         },
         {
           "hostname": "frapi.centos.hk",
           "role": "alias",
-          "default_base_path": "/v1",
-          "status": "active"
+          "status": "active",
+          "default_base_path": "/v1"
         }
-      ]
+      ],
+      "group_detection": {
+        "probe_model": "__api_authenticator_group_probe__"
+      },
+      "groups": []
     },
     {
       "slug": "true-sota",
       "name": "True SOTA",
       "kind": "relay",
-      "group_detection": {
-        "probe_model": "__api_authenticator_group_probe__"
-      },
-      "groups": [],
       "domains": [
         {
           "hostname": "true-sota.com",
           "role": "primary",
-          "default_base_path": "/v1",
-          "status": "active"
+          "status": "active",
+          "default_base_path": "/v1"
         }
-      ]
+      ],
+      "group_detection": {
+        "probe_model": "__api_authenticator_group_probe__"
+      },
+      "groups": []
     },
     {
       "slug": "gate-ai",
       "name": "Gate AI",
       "kind": "relay",
-      "group_detection": {
-        "probe_model": "__api_authenticator_group_probe__"
-      },
-      "groups": [],
       "domains": [
         {
           "hostname": "gateai.cc",
           "role": "primary",
-          "default_base_path": "/v1",
-          "status": "active"
+          "status": "active",
+          "default_base_path": "/v1"
         }
-      ]
+      ],
+      "group_detection": {
+        "probe_model": "__api_authenticator_group_probe__"
+      },
+      "groups": []
     },
     {
       "slug": "4-router",
       "name": "4 Router",
       "kind": "relay",
-      "group_detection": {
-        "probe_model": "__api_authenticator_group_probe__"
-      },
-      "groups": [],
       "domains": [
         {
           "hostname": "4router.net",
           "role": "primary",
-          "default_base_path": "/v1",
-          "status": "active"
+          "status": "active",
+          "default_base_path": "/v1"
         }
-      ]
+      ],
+      "group_detection": {
+        "probe_model": "__api_authenticator_group_probe__"
+      },
+      "groups": []
     }
   ]
 }
