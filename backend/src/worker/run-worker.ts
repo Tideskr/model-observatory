@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { setTimeout as delay } from 'node:timers/promises'
 import type { AppServices } from '../services.js'
 import { buildRunJobs, type ProbeJob } from '../executor/job-plan.js'
 import { sendNormalRequest, TransportError, type TransportResult } from '../executor/normal-transport.js'
@@ -18,6 +19,7 @@ export interface RunWorkerOptions {
   transport?: Transport
   workerId?: string
   leaseSeconds?: number
+  donationRequestIntervalMs?: number
 }
 
 export class RunWorker {
@@ -26,6 +28,8 @@ export class RunWorker {
   readonly #transport: Transport
   readonly #workerId: string
   readonly #leaseSeconds: number
+  readonly #donationRequestIntervalMs: number
+  #nextDonatedRequestAt = 0
 
   constructor(options: RunWorkerOptions) {
     this.#services = options.services
@@ -33,6 +37,7 @@ export class RunWorker {
     this.#transport = options.transport ?? sendNormalRequest
     this.#workerId = options.workerId ?? `worker-${randomUUID()}`
     this.#leaseSeconds = options.leaseSeconds ?? 60
+    this.#donationRequestIntervalMs = Math.max(0, options.donationRequestIntervalMs ?? 2_500)
   }
 
   async runOnce(): Promise<boolean> {
@@ -213,6 +218,7 @@ export class RunWorker {
   ): Promise<RawObservation> {
     for (let attempt = 0; attempt <= run.config.retries; attempt += 1) {
       await this.#ensureLease(run.id, lease, controller)
+      await this.#waitForRequestSlot(run, controller.signal)
       const reserved = await this.#services.runStore.reserveAttempt(run.id, job.jobId, run.config.retries + 1, lease)
       if (!reserved) return { job, status: 'error', safeError: 'attempt_budget_exhausted', safeMessage: 'This job exhausted its durable attempt budget.', attempts: attempt, retryable: false }
       try {
@@ -243,9 +249,18 @@ export class RunWorker {
             attempts: attempt + 1, statusCode: transport.statusCode, retryable: transport.retryable,
           }
         }
-        await new Promise((resolve) => setTimeout(resolve, Math.min(1000, 100 * 2 ** attempt)))
+        const backoff = transport.statusCode === 429 ? 60_000 : Math.min(1000, 100 * 2 ** attempt)
+        await delay(backoff, undefined, { signal: controller.signal })
       }
     }
     return { job, status: 'error', safeError: 'retry_exhausted', safeMessage: 'All configured retries were exhausted.', attempts: run.config.retries + 1, retryable: false }
+  }
+
+  async #waitForRequestSlot(run: RunRecord, signal: AbortSignal): Promise<void> {
+    if (run.evidenceSource !== 'donated' || this.#donationRequestIntervalMs === 0) return
+    const now = Date.now()
+    const scheduledAt = Math.max(now, this.#nextDonatedRequestAt)
+    this.#nextDonatedRequestAt = scheduledAt + this.#donationRequestIntervalMs
+    if (scheduledAt > now) await delay(scheduledAt - now, undefined, { signal })
   }
 }

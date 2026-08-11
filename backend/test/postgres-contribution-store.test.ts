@@ -63,3 +63,11 @@ test('donation scheduler repair migration permits idle scheduling and normalizes
   assert.match(migration, /jsonb_typeof\(errors\) IS DISTINCT FROM 'array'/)
   assert.match(migration, /donations_errors_array CHECK \(jsonb_typeof\(errors\) = 'array'\)/)
 })
+
+test('model confidence migration derives probability rather than binary pass rate', async () => {
+  const migration = await readFile(resolve(process.cwd(), 'migrations/009_model_probability_confidence.sql'), 'utf8')
+  assert.match(migration, /ADD COLUMN model_probability/)
+  assert.match(migration, /conditional_relative_probability/)
+  assert.match(migration, /round\(100\.0\*avg\(model_probability\)\)/)
+  assert.doesNotMatch(migration, /outcome='pass'/)
+})

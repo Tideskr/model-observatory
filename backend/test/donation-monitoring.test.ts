@@ -70,6 +70,7 @@ test('donated credentials schedule a full medium run and activate after valid ev
   const signatures: Record<string, string> = { low: '8', high: '40', xhigh: '128', max: '960' }
   const worker = new RunWorker({
     services, loadScoringRelease: async () => seed,
+    donationRequestIntervalMs: 0,
     transport: async (input) => {
       const prompt = input.messages.map((item) => item.content).join('\n')
       const synthetic = /J U I C E=(\d+)/.exec(prompt)?.[1]
@@ -79,6 +80,10 @@ test('donated credentials schedule a full medium run and activate after valid ev
   })
   assert.equal(await worker.runOnce(), true)
   assert.equal(await scheduler.reconcileOnce(), true)
+  const completedRuns = await services.contributionStore.listDonationCycleRuns(pending[0]!.cycleId)
+  assert.equal(completedRuns.length, 1)
+  assert.ok(completedRuns[0]!.modelProbability != null)
+  assert.ok(completedRuns[0]!.modelProbability! >= 0 && completedRuns[0]!.modelProbability! <= 1)
   const active = await services.contributionStore.getDonation(record.id)
   assert.equal(active?.status, 'active')
   assert.equal(active?.phase, 'active')

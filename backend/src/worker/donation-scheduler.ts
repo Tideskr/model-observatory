@@ -22,6 +22,17 @@ function number(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
+function modelProbability(report: RunReport): number | null {
+  const raw = report.summary['probability']
+  if (!raw || typeof raw !== 'object') return null
+  const probability = raw as Record<string, unknown>
+  if (probability['formal_eligible'] !== true) return null
+  const distribution = probability['conditional_relative_probability']
+  if (!distribution || typeof distribution !== 'object') return null
+  const value = (distribution as Record<string, unknown>)[report.target.model]
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1 ? value : null
+}
+
 function reportErrors(report: RunReport): DonationError[] {
   const raw = Array.isArray(report.summary['error_summary']) ? report.summary['error_summary'] : []
   return raw.slice(0, 20).flatMap((item): DonationError[] => {
@@ -159,7 +170,7 @@ export class DonationScheduler {
         createdRuns.push(run)
         await this.#services.runStore.create(run)
         runLinks.push({ cycleId, donationId: donation.id, privateRunId: runId, providerSlug: provider.slug,
-          groupId: group.id, model, attribution, outcome: null, successfulRequests: null, attemptedRequests: null,
+          groupId: group.id, model, modelProbability: null, attribution, outcome: null, successfulRequests: null, attemptedRequests: null,
           estimatedCostUsd: null, completedAt: null })
       }
       await this.#services.contributionStore.updateDonationFromWorker(donation.id, this.#workerId, {
@@ -202,6 +213,7 @@ export class DonationScheduler {
         outcome: runOutcome(report), successfulRequests: number(report.summary['successful_requests']),
         attemptedRequests: number(report.summary['completed_requests']),
         estimatedCostUsd: actualCost(report, pricing.input_per_million_usd, pricing.output_per_million_usd, group.multiplier, fallback),
+        modelProbability: modelProbability(report),
         anomalies: anomalies(report),
       })
       worked = true

@@ -243,9 +243,9 @@ export class PostgresContributionStore implements ContributionStore {
         [cycle.id, cycle.donationId, cycle.status, cycle.attribution, cycle.reservedCostUsd, cycle.actualCostUsd, cycle.createdAt, cycle.completedAt],
       )
       for (const run of runs) await client.query(
-        `INSERT INTO donation_test_runs(cycle_id,donation_id,private_run_id,provider_slug,group_id,model,attribution)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [run.cycleId, run.donationId, run.privateRunId, run.providerSlug, run.groupId, run.model, run.attribution],
+        `INSERT INTO donation_test_runs(cycle_id,donation_id,private_run_id,provider_slug,group_id,model,model_probability,attribution)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [run.cycleId, run.donationId, run.privateRunId, run.providerSlug, run.groupId, run.model, run.modelProbability, run.attribution],
       )
       await client.query(
         `UPDATE donations SET phase='testing',progress_current=0,current_model=$3,next_run_at=NULL,
@@ -262,29 +262,30 @@ export class PostgresContributionStore implements ContributionStore {
   async listPendingDonationRuns(): Promise<DonationTestRunRecord[]> {
     const result = await this.pool.query<{
       cycle_id: string; donation_id: string; private_run_id: string; provider_slug: string; group_id: string; model: string;
-      attribution: DonationTestRunRecord['attribution']; outcome: DonationTestRunRecord['outcome']; successful_requests: number | null;
+      model_probability: string | null; attribution: DonationTestRunRecord['attribution']; outcome: DonationTestRunRecord['outcome']; successful_requests: number | null;
       attempted_requests: number | null; estimated_cost_usd: string | null; completed_at: Date | null
-    }>(`SELECT cycle_id,donation_id,private_run_id,provider_slug,group_id,model,attribution,outcome,
+    }>(`SELECT cycle_id,donation_id,private_run_id,provider_slug,group_id,model,model_probability,attribution,outcome,
         successful_requests,attempted_requests,estimated_cost_usd,completed_at
         FROM donation_test_runs WHERE completed_at IS NULL AND excluded=false ORDER BY cycle_id,model`)
     return result.rows.map((row) => ({
       cycleId: row.cycle_id, donationId: row.donation_id, privateRunId: row.private_run_id,
-      providerSlug: row.provider_slug, groupId: row.group_id, model: row.model, attribution: row.attribution,
+      providerSlug: row.provider_slug, groupId: row.group_id, model: row.model,
+      modelProbability: row.model_probability == null ? null : Number(row.model_probability), attribution: row.attribution,
       outcome: row.outcome, successfulRequests: row.successful_requests, attemptedRequests: row.attempted_requests,
       estimatedCostUsd: row.estimated_cost_usd == null ? null : Number(row.estimated_cost_usd),
       completedAt: row.completed_at?.toISOString() ?? null,
     }))
   }
 
-  async completeDonationRun(runId: string, completion: { outcome: NonNullable<DonationTestRunRecord['outcome']>; successfulRequests: number; attemptedRequests: number; estimatedCostUsd: number; anomalies: DonationRunAnomaly[] }): Promise<void> {
+  async completeDonationRun(runId: string, completion: { outcome: NonNullable<DonationTestRunRecord['outcome']>; successfulRequests: number; attemptedRequests: number; estimatedCostUsd: number; modelProbability: number | null; anomalies: DonationRunAnomaly[] }): Promise<void> {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
       const updated = await client.query<{ cycle_id: string; donation_id: string; provider_slug: string; group_id: string; model: string; attribution: DonationTestRunRecord['attribution'] }>(
         `UPDATE donation_test_runs SET outcome=$2,successful_requests=$3,attempted_requests=$4,
-         estimated_cost_usd=$5,completed_at=now() WHERE private_run_id=$1 AND completed_at IS NULL AND excluded=false
+         estimated_cost_usd=$5,model_probability=$6,completed_at=now() WHERE private_run_id=$1 AND completed_at IS NULL AND excluded=false
          RETURNING cycle_id,donation_id,provider_slug,group_id,model,attribution`,
-        [runId, completion.outcome, completion.successfulRequests, completion.attemptedRequests, completion.estimatedCostUsd],
+        [runId, completion.outcome, completion.successfulRequests, completion.attemptedRequests, completion.estimatedCostUsd, completion.modelProbability],
       )
       const row = updated.rows[0]
       if (!row) { await client.query('COMMIT'); return }
@@ -326,12 +327,13 @@ export class PostgresContributionStore implements ContributionStore {
   private async listPendingAndCompletedCycleRuns(cycleId: string): Promise<DonationTestRunRecord[]> {
     const result = await this.pool.query<{
       cycle_id: string; donation_id: string; private_run_id: string; provider_slug: string; group_id: string; model: string;
-      attribution: DonationTestRunRecord['attribution']; outcome: DonationTestRunRecord['outcome']; successful_requests: number | null;
+      model_probability: string | null; attribution: DonationTestRunRecord['attribution']; outcome: DonationTestRunRecord['outcome']; successful_requests: number | null;
       attempted_requests: number | null; estimated_cost_usd: string | null; completed_at: Date | null
-    }>(`SELECT cycle_id,donation_id,private_run_id,provider_slug,group_id,model,attribution,outcome,
+    }>(`SELECT cycle_id,donation_id,private_run_id,provider_slug,group_id,model,model_probability,attribution,outcome,
         successful_requests,attempted_requests,estimated_cost_usd,completed_at FROM donation_test_runs WHERE cycle_id=$1 ORDER BY model`, [cycleId])
     return result.rows.map((row) => ({ cycleId: row.cycle_id, donationId: row.donation_id, privateRunId: row.private_run_id,
-      providerSlug: row.provider_slug, groupId: row.group_id, model: row.model, attribution: row.attribution,
+      providerSlug: row.provider_slug, groupId: row.group_id, model: row.model,
+      modelProbability: row.model_probability == null ? null : Number(row.model_probability), attribution: row.attribution,
       outcome: row.outcome, successfulRequests: row.successful_requests, attemptedRequests: row.attempted_requests,
       estimatedCostUsd: row.estimated_cost_usd == null ? null : Number(row.estimated_cost_usd), completedAt: row.completed_at?.toISOString() ?? null }))
   }
@@ -368,11 +370,12 @@ export class PostgresContributionStore implements ContributionStore {
           `INSERT INTO provider_source_scores(provider_slug,group_id,model,source,confidence,samples,availability,
              attempted_samples,inconclusive_samples,verified_samples,declared_samples)
            SELECT $1,$2,$3,'donated',
-             round(100.0*count(*) FILTER (WHERE outcome='pass')/NULLIF(count(*) FILTER (WHERE outcome IN ('pass','fail')),0))::integer,
-             count(*) FILTER (WHERE outcome IN ('pass','fail'))::integer,
+             round(100.0*avg(model_probability))::integer,
+             count(model_probability)::integer,
              round(100.0*sum(successful_requests)/NULLIF(sum(attempted_requests),0))::integer,
              COALESCE(sum(attempted_requests),0)::integer,count(*) FILTER (WHERE outcome='inconclusive')::integer,
-             count(*) FILTER (WHERE attribution='verified')::integer,count(*) FILTER (WHERE attribution='donor_declared')::integer
+             count(*) FILTER (WHERE attribution='verified' AND model_probability IS NOT NULL)::integer,
+             count(*) FILTER (WHERE attribution='donor_declared' AND model_probability IS NOT NULL)::integer
            FROM donation_test_runs WHERE provider_slug=$1 AND group_id=$2 AND model=$3 AND excluded=false AND completed_at>=now()-interval '30 days'
            ON CONFLICT (provider_slug,group_id,model,source) DO UPDATE SET confidence=excluded.confidence,
              samples=excluded.samples,availability=excluded.availability,attempted_samples=excluded.attempted_samples,

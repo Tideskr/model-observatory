@@ -66,6 +66,7 @@ export interface DonationTestRunRecord {
   providerSlug: string
   groupId: string
   model: string
+  modelProbability: number | null
   attribution: 'verified' | 'donor_declared'
   outcome: 'pass' | 'fail' | 'inconclusive' | 'unavailable' | null
   successfulRequests: number | null
@@ -97,7 +98,7 @@ export interface ContributionStore {
   listPendingDonationRuns(): Promise<DonationTestRunRecord[]>
   completeDonationRun(runId: string, completion: {
     outcome: NonNullable<DonationTestRunRecord['outcome']>; successfulRequests: number; attemptedRequests: number;
-    estimatedCostUsd: number; anomalies: DonationRunAnomaly[]
+    estimatedCostUsd: number; modelProbability: number | null; anomalies: DonationRunAnomaly[]
   }): Promise<void>
   listReadyDonationCycles(): Promise<DonationCycleRecord[]>
   listDonationCycleRuns(cycleId: string): Promise<DonationTestRunRecord[]>
@@ -191,7 +192,7 @@ export class MemoryContributionStore implements ContributionStore {
     return [...this.#testRuns.values()].filter((item) => !item.completedAt).map((item) => structuredClone(item))
   }
 
-  async completeDonationRun(runId: string, completion: { outcome: NonNullable<DonationTestRunRecord['outcome']>; successfulRequests: number; attemptedRequests: number; estimatedCostUsd: number; anomalies: DonationRunAnomaly[] }): Promise<void> {
+  async completeDonationRun(runId: string, completion: { outcome: NonNullable<DonationTestRunRecord['outcome']>; successfulRequests: number; attemptedRequests: number; estimatedCostUsd: number; modelProbability: number | null; anomalies: DonationRunAnomaly[] }): Promise<void> {
     const run = this.#testRuns.get(runId)
     if (!run || run.completedAt) return
     Object.assign(run, completion, { completedAt: new Date().toISOString() })
