@@ -189,6 +189,49 @@
         "probe_model": "__api_authenticator_group_probe__"
       },
       "groups": []
+    },
+    {
+      "slug": "axis",
+      "name": "元流",
+      "kind": "relay",
+      "domains": [
+        {
+          "hostname": "axis.pink",
+          "role": "primary",
+          "status": "active",
+          "default_base_path": "/v1"
+        },
+        {
+          "hostname": "api.axis.fan",
+          "role": "alias",
+          "status": "active",
+          "default_base_path": "/v1"
+        },
+        {
+          "hostname": "axis.yoga",
+          "role": "alias",
+          "status": "active",
+          "default_base_path": "/v1"
+        }
+      ],
+      "group_detection": {
+        "probe_model": "__api_authenticator_group_probe__"
+      },
+      "groups": [
+        {
+          "id": "balance",
+          "name": "余额",
+          "aliases": [
+            "默认"
+          ],
+          "multiplier": 0.4,
+          "models": [
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna"
+          ]
+        }
+      ]
     }
   ]
 }
