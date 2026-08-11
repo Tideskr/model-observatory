@@ -29,14 +29,17 @@ interface RunnerStatusResponse {
 
 const PROBE_TIMEOUT_MS = 800
 
+type LoopbackRequestInit = RequestInit & { targetAddressSpace: 'loopback' }
+
 /** One-shot probe. Deliberately not polled — the page should stay quiet. */
 export async function detectLocalRunner(): Promise<RunnerState> {
   try {
-    const response = await fetch(`${LOCAL_RUNNER_ORIGIN}/status`, {
+    const request: LoopbackRequestInit = {
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-      // Chromium gates private-network subresource requests on this hint.
       mode: 'cors',
-    })
+      targetAddressSpace: 'loopback',
+    }
+    const response = await fetch(`${LOCAL_RUNNER_ORIGIN}/status`, request)
     if (!response.ok) return { status: 'absent' }
 
     const body = (await response.json()) as RunnerStatusResponse

@@ -38,6 +38,8 @@ Model Observatory 不声称能“保证模型是真的”。提供商可能识�
 
 仅应使用短期、限额、可撤销、限定模型和来源的凭据。长期主密钥不属于推荐的捐赠方式。详见 [`docs/CREDENTIAL_AND_NATIVE_DISCLOSURE.md`](./docs/CREDENTIAL_AND_NATIVE_DISCLOSURE.md)。
 
+本地 runner 源码位于 [`local-runner/`](./local-runner)，Release 提供可直接解压运行的包。runner 监听 `127.0.0.1:8756` 并与线上私有检测页面连接，API key 不经过项目服务器。
+
 ## 本地开发
 
 需要 Node.js 22+ 和 npm 11+。开发模式可使用内存存储：
@@ -73,6 +75,8 @@ docker compose --env-file .env.production -f compose.production.yml up -d --buil
 
 容器端口默认只发布到宿主机 `127.0.0.1:18787`。`deploy/Caddyfile` 提供 `check.skr.moe` 的 HTTPS 反向代理配置。
 
+`.github/workflows/deploy.yml` 会在 `main` 分支每次提交后通过受限 SSH 密钥触发生产部署。VPS 上的固定入口串行执行 `deploy/server-deploy.sh`，仅允许快进到远端 `main`，重新构建 Compose 服务并等待健康检查通过。
+
 ## 目录
 
 ```text
@@ -81,6 +85,7 @@ docker compose --env-file .env.production -f compose.production.yml up -d --buil
 |-- docs/                   # 产品、安全与社区治理文档
 |-- backend/                # Fastify API、PostgreSQL 迁移、worker 与评分器
 |-- frontend/               # React + TypeScript + Vite 前端
+|-- local-runner/           # Python 本地检测器与前端兼容 API
 `-- README.md
 ```
 

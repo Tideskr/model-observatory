@@ -32,3 +32,8 @@ logs
 .vscode/*
 !.vscode/extensions.json
 *.local
+
+# Python local runner runtime state
+__pycache__/
+*.py[cod]
+local-runner/gpt56_vnext_runs/

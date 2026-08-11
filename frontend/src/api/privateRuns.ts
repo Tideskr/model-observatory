@@ -1,4 +1,4 @@
-import { apiUrl } from '../config'
+import { apiUrl, LOCAL_RUNNER_ORIGIN } from '../config'
 import type { PriceAssumption } from '../pricing'
 import type { RunConfig } from '../probes'
 
@@ -9,6 +9,13 @@ export type PrivateRunStatus =
   | 'failed' | 'cancelled' | 'timed_out' | 'incomplete' | 'deleted'
 
 interface ApiErrorBody { detail?: string; code?: string }
+type LoopbackRequestInit = RequestInit & { targetAddressSpace?: 'loopback' }
+
+function requestInit(apiOrigin: string, init: RequestInit = {}): LoopbackRequestInit {
+  return apiOrigin === LOCAL_RUNNER_ORIGIN
+    ? { ...init, targetAddressSpace: 'loopback' }
+    : init
+}
 
 export class PrivateRunApiError extends Error {
   readonly status: number
@@ -85,7 +92,7 @@ export async function createPrivateRun(input: {
 }): Promise<PrivateRunHandle> {
   let prepared = input.prepared
   if (!prepared) {
-    const quote = await json<{ quote_token: string }>(await fetch(apiUrl('/api/v1/private-runs/quote', input.apiOrigin), {
+    const quote = await json<{ quote_token: string }>(await fetch(apiUrl('/api/v1/private-runs/quote', input.apiOrigin), requestInit(input.apiOrigin, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -100,13 +107,13 @@ export async function createPrivateRun(input: {
         },
       }),
       signal: input.signal,
-    }))
+    })))
     prepared = { quoteToken: quote.quote_token }
     input.onPrepared?.(prepared)
   }
   const created = await json<{
     run_id: string; owner_token: string; status: PrivateRunStatus; events_url: string; expires_at: string
-  }>(await fetch(apiUrl('/api/v1/private-runs', input.apiOrigin), {
+  }>(await fetch(apiUrl('/api/v1/private-runs', input.apiOrigin), requestInit(input.apiOrigin, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'idempotency-key': input.idempotencyKey },
     body: JSON.stringify({
@@ -115,7 +122,7 @@ export async function createPrivateRun(input: {
       consent: { disclosure_version: PRIVATE_RUN_DISCLOSURE_VERSION, accepted_at: new Date().toISOString() },
     }),
     signal: input.signal,
-  }))
+  })))
   return {
     runId: created.run_id,
     ownerToken: created.owner_token,
@@ -143,10 +150,10 @@ function parseEvents(raw: string): PrivateRunEvent[] {
 }
 
 export async function getPrivateRunReport(handle: PrivateRunHandle, signal?: AbortSignal): Promise<PrivateRunReport> {
-  return json<PrivateRunReport>(await fetch(apiUrl(`/api/v1/private-runs/${handle.runId}/report`, handle.apiOrigin), {
+  return json<PrivateRunReport>(await fetch(apiUrl(`/api/v1/private-runs/${handle.runId}/report`, handle.apiOrigin), requestInit(handle.apiOrigin, {
     headers: { authorization: `Bearer ${handle.ownerToken}`, accept: 'application/json' },
     signal,
-  }))
+  })))
 }
 
 export async function waitForPrivateRun(
@@ -156,10 +163,10 @@ export async function waitForPrivateRun(
 ): Promise<PrivateRunReport> {
   let cursor = '0'
   for (;;) {
-    const response = await fetch(apiUrl(handle.eventsUrl, handle.apiOrigin), {
+    const response = await fetch(apiUrl(handle.eventsUrl, handle.apiOrigin), requestInit(handle.apiOrigin, {
       headers: { authorization: `Bearer ${handle.ownerToken}`, 'last-event-id': cursor, accept: 'text/event-stream' },
       signal,
-    })
+    }))
     if (!response.ok) await json<never>(response)
     for (const event of parseEvents(await response.text())) {
       cursor = event.id
@@ -176,7 +183,7 @@ export async function waitForPrivateRun(
 export async function cancelPrivateRun(handle: PrivateRunHandle): Promise<PrivateRunStatus> {
   const response = await json<{ status: PrivateRunStatus }>(await fetch(
     apiUrl(`/api/v1/private-runs/${handle.runId}/cancel`, handle.apiOrigin),
-    { method: 'POST', headers: { authorization: `Bearer ${handle.ownerToken}` } },
+    requestInit(handle.apiOrigin, { method: 'POST', headers: { authorization: `Bearer ${handle.ownerToken}` } }),
   ))
   return response.status
 }

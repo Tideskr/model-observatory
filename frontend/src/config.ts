@@ -1,13 +1,7 @@
-/* Deployment-specific constants.
- *
- * TODO(owner): these are placeholders. The repository URL and the runner
- * download URL are not knowable from this working tree — fill them in before
- * shipping, or the Registry edit button and the runner download button will
- * point nowhere.
- */
+/* Deployment-specific constants. */
 
 /** Used to build prefilled issue URLs from the Registry edit dialog. */
-export const REPO_URL = 'https://github.com/OWNER/REPO'
+export const REPO_URL = 'https://github.com/Tideskr/model-observatory'
 
 /** GitHub issue form template filename under .github/ISSUE_TEMPLATE/. */
 export const PROBE_ISSUE_TEMPLATE = 'probe-change.yml'

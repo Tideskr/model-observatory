@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPT-5.6 混用检测器</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <strong>GPT-5.6 混用检测器</strong>
+      <span>v4.1.1 · 本机运行</span>
+    </div>
+    <a href="/generator">探针生成器</a>
+  </header>
+  <nav class="steps" aria-label="检测步骤">
+    <button class="step active" data-step="connect"><span>1</span>连接</button>
+    <button class="step" data-step="plan"><span>2</span>方案</button>
+    <button class="step" data-step="run"><span>3</span>运行</button>
+    <button class="step" data-step="report"><span>4</span>报告</button>
+  </nav>
+
+  <main>
+    <section id="step-connect" class="page-step active">
+      <div class="section-heading"><div><h1>连接待测 API</h1><p>正式检测不需要可信端。API key 仅保存在当前进程内存。</p></div><span class="local-badge">仅监听 127.0.0.1</span></div>
+      <div class="form-grid connection-grid">
+        <label>API 地址<input id="base-url" type="url" placeholder="https://example.com/v1" autocomplete="off"></label>
+        <label>模型名<input id="model" value="gpt-5.6-sol" autocomplete="off"></label>
+        <label class="wide">API key<input id="api-key" type="password" autocomplete="off" placeholder="仅保存在内存"></label>
+      </div>
+      <div class="actions"><button id="to-plan" class="primary">继续配置</button></div>
+    </section>
+
+    <section id="step-plan" class="page-step">
+      <div class="section-heading"><div><h1>检测方案</h1><p>选择内置档位，修改任何参数后会自动切换为自定义。</p></div></div>
+      <div class="control-band">
+        <div><span class="control-label">运行方式</span><div id="mode-switch" class="segmented"><button data-mode="single" class="selected">单次检测</button><button data-mode="continuous">持续监控</button></div></div>
+        <div><span class="control-label">档位</span><div id="preset-switch" class="segmented"><button data-preset="low" class="selected">低</button><button data-preset="medium">中</button><button data-preset="high">高</button><button data-preset="custom">自定义</button></div></div>
+      </div>
+      <div id="custom-banner" class="warning-banner hidden"><strong>自定义档位测试结果仅供参考</strong><span id="custom-diff">参数已修改。</span></div>
+
+      <div class="layout-two">
+        <div>
+          <section class="plain-section">
+            <h2>请求外观与上下文</h2>
+            <div class="option-grid">
+              <label class="check-row"><input type="checkbox" id="format-normal">普通 Responses 请求<span>基础外观</span></label>
+              <label class="check-row"><input type="checkbox" id="format-native">原生 Codex 请求<span>建议先开启系统级 TUN VPN；浏览器代理不一定覆盖检测进程</span></label>
+              <label class="check-row"><input type="checkbox" id="context-none">无历史<span>最低 Token 消耗</span></label>
+              <label class="check-row"><input type="checkbox" id="context-32k">固定 32K 历史<span>每次约 33,792 输入 tokens，会明显增加消耗</span></label>
+            </div>
+          </section>
+          <section class="plain-section">
+            <div class="section-row"><h2>探测项目</h2><label class="file-action">导入自定义探针<input id="probe-file" type="file" accept=".json,.gpt56probe.json"></label></div>
+            <div id="probe-list" class="probe-list"></div>
+          </section>
+        </div>
+        <aside class="summary-panel">
+          <h2>计划预览</h2>
+          <dl id="estimate"><div><dt>请求数</dt><dd>—</dd></div></dl>
+          <div id="high-cost" class="cost-warning hidden"></div>
+          <label>并发数<input id="workers" type="number" min="1" max="32" value="8"><small>默认 8；提高后更容易触发上游限流。</small></label>
+          <div id="continuous-settings" class="hidden">
+            <label>最短间隔秒数<input id="min-interval" type="number" min="0" value="150"></label>
+            <label>最长间隔秒数<input id="max-interval" type="number" min="0" value="210"></label>
+            <label>每周期槽数<input id="slots-per-cycle" type="number" min="1" value="1"></label>
+          </div>
+          <label class="check-row retention-toggle"><input id="retention-enabled" type="checkbox">保存完整请求和返回<span>默认关闭，不保存认证头</span></label>
+          <label id="retention-path-row" class="hidden">留存目录<input id="retention-path" placeholder="请输入绝对路径" autocomplete="off"><small>可能包含题面、上下文和完整输出，请选择受控目录。</small></label>
+          <div class="actions vertical"><button id="restore-defaults" class="secondary">恢复本档默认参数</button><button id="start-run" class="primary">开始检测</button><button id="back-connect" class="secondary">返回连接</button></div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="step-run" class="page-step">
+      <div class="section-heading"><div><h1>运行状态</h1><p id="run-subtitle">正在建立会话。</p></div><button id="stop-run" class="danger">停止</button></div>
+      <div class="status-strip"><span id="run-status" class="status-dot running">运行中</span><span id="run-session">会话 —</span><span id="run-updated">—</span></div>
+      <div class="progress-track"><div id="run-progress" style="width:0%"></div></div>
+      <div id="run-details" class="run-grid"></div>
+      <details class="log-panel"><summary>原始运行状态</summary><pre id="raw-status"></pre></details>
+    </section>
+
+    <section id="step-report" class="page-step">
+      <div id="report-empty" class="empty-state"><h1>尚无报告</h1><p>完成一次检测后，这里会显示简明结论和技术细节。</p></div>
+      <div id="report-content" class="hidden">
+        <div id="verdict-band" class="verdict-band"><div><span class="eyebrow">综合结论</span><h1 id="verdict-title">—</h1><p id="verdict-subtitle"></p></div><button id="new-session" class="secondary">新建会话</button></div>
+        <div id="report-custom" class="warning-banner hidden"><strong>自定义档位测试结果仅供参考</strong><span></span></div>
+        <section class="report-section fingerprint-section">
+          <div class="section-heading compact"><div><h2>指纹匹配度</h2><p>表示本批答案分布与三种可信基线的相对接近程度，不是真实路由概率或混用比例。</p></div><strong id="fingerprint-status" class="fingerprint-status">—</strong></div>
+          <div id="fingerprint-bars" class="fingerprint-bars"></div>
+          <details class="reference-note"><summary>现有验证参考与适用边界</summary><div id="fingerprint-reference"></div></details>
+        </section>
+        <section class="report-section"><h2>Juice 结果</h2><div id="juice-result" class="data-table"></div></section>
+        <section class="report-section"><h2>输出完整性与覆盖检测</h2><div id="deterministic-results" class="report-list"></div></section>
+        <section class="report-section"><h2>线路质量</h2><div id="network-result" class="metrics"></div></section>
+        <section class="report-section"><h2>未通过或未完成项目</h2><div id="failed-items" class="report-list"></div></section>
+        <section class="report-section"><h2>行为指纹探针</h2><div id="probe-results" class="data-table"></div></section>
+        <section class="report-section"><h2>请求格式对比</h2><div id="profile-results" class="data-table"></div></section>
+        <details class="report-section technical"><summary>方法、限制和 JSON 摘要</summary><div id="limitations"></div><p><a class="download-link" href="/api/detector/report" download="gpt56-report.json">下载完整 JSON 报告</a></p><pre id="report-json"></pre></details>
+      </div>
+    </section>
+  </main>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="/assets/detector.js"></script>
+</body>
+</html>
