@@ -25,8 +25,7 @@ COPY backend/package.json backend/package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=backend-build /build/backend/dist ./dist
 COPY backend/migrations ./migrations
-COPY Legacy/gpt56_vnext/baselines/runtime_catalog.json /app/Legacy/gpt56_vnext/baselines/runtime_catalog.json
-COPY Legacy/gpt56_vnext/baselines/trusted_likelihood_v2.json /app/Legacy/gpt56_vnext/baselines/trusted_likelihood_v2.json
+COPY scoring-releases/gpt56-v3 /app/scoring-releases/gpt56-v3
 COPY --from=frontend-build /build/frontend/dist /app/public
 USER node
 EXPOSE 8787

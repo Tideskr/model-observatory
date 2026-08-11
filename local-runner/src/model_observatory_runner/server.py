@@ -3,11 +3,10 @@ from __future__ import annotations
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hashlib
 import json
-import mimetypes
-import os
 from pathlib import Path
 import re
 import secrets
+import shutil
 import sqlite3
 import threading
 from typing import Any
@@ -15,20 +14,18 @@ from urllib.parse import urlsplit
 
 from .detector import DEFAULT_BASELINE, DetectorSession
 from .generator import GeneratorPlan, ProbeGeneratorSession, probe_document, verify_probe_file, wrap_probe_file
-from .observatory_api import ApiProblem, ObservatoryApi
+from . import __version__
+from .api import ApiProblem, ObservatoryApi
 from .presets import estimate_single_requests, normalize_config, preset_catalog
 from .probability_model import load_baseline
 from .retention import RetentionWriteError
+from .release import SCORING_RELEASE_ID
 from .store import SQLiteStateStore
 from .transport import StreamingTransport
 from .utils import canonical_json, normalize_api_base_url, utc_now
 
 
-WEB_ROOT = Path(__file__).with_name("web")
-RUNNER_VERSION = (Path(__file__).parent.parent / "VERSION").read_text(encoding="utf-8").strip()
-DEFAULT_ALLOWED_ORIGINS = {"https://check.skr.moe"}
-
-
+RUNNER_VERSION = __version__
 def _probability_probe_catalog() -> list[dict[str, Any]]:
     try:
         baseline = load_baseline(DEFAULT_BASELINE)
@@ -270,10 +267,10 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         if not origin:
             return None
+        if origin == "null":
+            return origin
         parsed = urlsplit(origin)
-        if parsed.scheme in {"http", "https"} and parsed.hostname in {"127.0.0.1", "localhost"}:
-            return origin.rstrip("/")
-        if origin.rstrip("/") in self.server.allowed_origins:
+        if parsed.scheme in {"http", "https"} and parsed.hostname:
             return origin.rstrip("/")
         return None
 
@@ -282,7 +279,7 @@ class Handler(BaseHTTPRequestHandler):
         if not origin or self._cors_origin() is not None:
             return True
         self._send_json(
-            {"code": "origin_not_allowed", "detail": "this origin is not allowed to use the local runner"},
+            {"code": "origin_not_allowed", "detail": "the request Origin is not a valid web origin"},
             403,
         )
         return False
@@ -372,7 +369,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({
                     "service": "model-observatory-runner",
                     "version": RUNNER_VERSION,
-                    "capabilities": {"normal": True, "native_codex": True, "fixed_32k_history": True},
+                    "protocol_version": "private-runs-v1",
+                    "scoring_release_id": SCORING_RELEASE_ID,
+                    "capabilities": {
+                        "normal": True,
+                        "native_codex": shutil.which("node") is not None,
+                        "fixed_32k_history": True,
+                        "detailed_progress": True,
+                        "detailed_report": True,
+                    },
                 }, cors=True)
             return
         run_match = re.fullmatch(r"/api/v1/private-runs/([0-9a-f-]+)/(events|report)", path)
@@ -454,27 +459,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        self._serve_static(path)
-
-    def _serve_static(self, path: str) -> None:
-        mapping = {"/": "index.html", "/generator": "generator.html"}
-        name = mapping.get(path, path.removeprefix("/assets/")) if path.startswith("/assets/") or path in mapping else None
-        if not name or ".." in name:
-            self.send_error(404)
-            return
-        file_path = WEB_ROOT / name
-        if not file_path.exists():
-            self.send_error(404)
-            return
-        body = file_path.read_bytes()
-        content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
-        self.send_response(200)
-        self.send_header("Content-Type", content_type + ("; charset=utf-8" if content_type.startswith(("text/", "application/javascript")) else ""))
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'")
-        self.end_headers()
-        self.wfile.write(body)
+        self._send_json({"code": "not_found", "detail": "Runner has no local user interface; connect from a compatible website"}, 404)
 
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
@@ -851,12 +836,6 @@ class AppServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], state: AppState):
         super().__init__(address, Handler)
         self.state = state
-        configured = {
-            item.strip().rstrip("/")
-            for item in os.environ.get("MODEL_OBSERVATORY_ALLOWED_ORIGINS", "").split(",")
-            if item.strip()
-        }
-        self.allowed_origins = DEFAULT_ALLOWED_ORIGINS | configured
 
     def server_close(self) -> None:
         with self.state.lock:
@@ -894,8 +873,12 @@ class AppServer(ThreadingHTTPServer):
         super().server_close()
 
 
-def create_server(*, port: int = 0, runs_root: str | Path | None = None) -> AppServer:
-    state = AppState(Path(runs_root or Path.cwd() / "gpt56_vnext_runs"))
+def create_server(
+    *,
+    port: int = 0,
+    runs_root: str | Path | None = None,
+) -> AppServer:
+    state = AppState(Path(runs_root or Path.cwd() / "model-observatory-runs"))
     return AppServer(("127.0.0.1", port), state)
 
 

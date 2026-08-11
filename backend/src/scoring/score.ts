@@ -4,6 +4,7 @@ import type { ProbeJob } from '../executor/job-plan.js'
 import type { ScoringCalibrationSeed, ScoringCellSeed, ScoringReleaseSeed } from './types.js'
 
 const TARGET_MODELS = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'] as const
+const MODEL_LABELS: Record<string, string> = { 'gpt-5.6-sol': 'Sol', 'gpt-5.6-terra': 'Terra', 'gpt-5.6-luna': 'Luna' }
 const REFUSALS = ['cannot provide', "can't provide", 'unable to provide', '不能提供', '无法提供', '不能透露', '无法透露']
 
 export interface RawObservation {
@@ -12,6 +13,10 @@ export interface RawObservation {
   answer?: string
   elapsedMs?: number
   safeError?: string
+  safeMessage?: string
+  attempts?: number
+  statusCode?: number | null
+  retryable?: boolean
 }
 
 export interface ScoringResult {
@@ -46,18 +51,25 @@ function matchesSignature(modelId: string, effort: string, value: string, seed: 
 
 export function scoreObservation(run: RunRecord, raw: RawObservation, seed: ScoringReleaseSeed): StoredObservation {
   const job = raw.job
+  const transportMetadata = {
+    effort: job.effort,
+    attempts_sent: raw.attempts ?? 1,
+    http_status: raw.statusCode ?? null,
+    retryable: raw.retryable ?? false,
+    safe_message: raw.safeMessage ?? null,
+  }
   if (raw.status !== 'ok') {
     return {
       jobId: job.jobId, probeId: job.probeId, profile: job.profile, status: raw.status,
       normalizedValue: null, classification: null, hardAnomaly: false,
-      elapsedMs: raw.elapsedMs ?? null, safeError: raw.safeError ?? null, metadata: { effort: job.effort },
+      elapsedMs: raw.elapsedMs ?? null, safeError: raw.safeError ?? null, metadata: transportMetadata,
     }
   }
   const answer = raw.answer ?? ''
   let normalizedValue: string | null = answer
   let classification = 'unsuccessful'
   let hardAnomaly = false
-  const metadata: Record<string, unknown> = { effort: job.effort }
+  const metadata: Record<string, unknown> = transportMetadata
 
   if (job.probeId.startsWith('juice_') && job.probeId !== 'juice_coverage') {
     normalizedValue = normalizeNumber(answer)
@@ -144,12 +156,15 @@ function juiceSummary(run: RunRecord, rows: StoredObservation[]): Record<string,
     }
   }
   const efforts = Object.values(perEffort)
+  const total = (name: string) => efforts.reduce((sum, item) => sum + (item[name] ?? 0), 0)
   const pass = efforts.length > 0 && !mixed && efforts.every((item) => item['current_success']! >= 1)
   const allUnsuccessful = efforts.length > 0 && !mixed && efforts.every((item) => item['valid_completed']! >= item['minimum_valid']! && item['current_success'] === 0 && item['unsuccessful'] === item['valid_completed'])
   const state = mixed ? 'juice_mixed' : pass ? 'juice_pass' : allUnsuccessful ? 'juice_all_unsuccessful' : 'data_insufficient'
   return {
     state, juice_mixed: mixed, juice_pass: pass, juice_all_unsuccessful: allUnsuccessful,
-    data_insufficient: state === 'data_insufficient', mixed_models_observed: [...mixedModels].toSorted(), per_effort: perEffort,
+    data_insufficient: state === 'data_insufficient', mixed_models_observed: [...mixedModels].toSorted(),
+    current_success: total('current_success'), mixed: total('mixed'), unsuccessful: total('unsuccessful'),
+    network_error: total('network_error'), per_effort: perEffort,
   }
 }
 
@@ -182,79 +197,29 @@ function softmax(scores: Record<string, number>): Record<string, number> {
   return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value / total]))
 }
 
-interface CellRuntime {
-  key: string
-  probeId: string
-  counts: Record<string, number>
-  sampleCount: number
-  complete: boolean
-  weight: number
-  isolated: boolean
-  distributions: Record<string, Record<string, number>>
-  scores: Record<string, number>
-}
-
-function mixture(cells: CellRuntime[]): { proportions: Record<string, number>; mixture_gain: number; second_share: number } {
-  const usable = cells.filter((cell) => cell.complete && !cell.isolated && cell.weight > 0)
-  if (!usable.length) return { proportions: {}, mixture_gain: 0, second_share: 0 }
-  const likelihood = (shares: number[]) => usable.reduce((total, cell) => {
-    return total + Object.entries(cell.counts).reduce((sum, [category, count]) => {
-      const probability = TARGET_MODELS.reduce((value, model, index) => value + shares[index]! * (cell.distributions[model]?.[category] ?? 0), 0)
-      return sum + (cell.weight / Math.max(1, cell.sampleCount)) * count * safeLog(probability)
-    }, 0)
-  }, 0)
-  let best = [1 / 3, 1 / 3, 1 / 3]
-  let bestValue = Number.NEGATIVE_INFINITY
-  for (const start of [[1 / 3, 1 / 3, 1 / 3], [0.8, 0.1, 0.1], [0.1, 0.8, 0.1], [0.1, 0.1, 0.8]]) {
-    let shares = [...start]
-    for (let iteration = 0; iteration < 500; iteration += 1) {
-      const responsibilities = [0, 0, 0]
-      let totalWeight = 0
-      for (const cell of usable) {
-        for (const [category, count] of Object.entries(cell.counts)) {
-          const probabilities = TARGET_MODELS.map((model) => cell.distributions[model]?.[category] ?? 0)
-          const denominator = shares.reduce((sum, share, index) => sum + share * probabilities[index]!, 0)
-          if (denominator <= 0) continue
-          const weight = (cell.weight / Math.max(1, cell.sampleCount)) * count
-          totalWeight += weight
-          for (let index = 0; index < 3; index += 1) responsibilities[index]! += weight * shares[index]! * probabilities[index]! / denominator
-        }
-      }
-      if (totalWeight <= 0) break
-      const updated = responsibilities.map((value) => value / totalWeight)
-      if (Math.max(...updated.map((value, index) => Math.abs(value - shares[index]!))) < 1e-10) {
-        shares = updated
-        break
-      }
-      shares = updated
-    }
-    const value = likelihood(shares)
-    if (value > bestValue) { best = shares; bestValue = value }
-  }
-  const bestPure = Math.max(...TARGET_MODELS.map((_model, target) => likelihood(TARGET_MODELS.map((_item, index) => index === target ? 1 : 0))))
-  const ordered = [...best].toSorted((a, b) => b - a)
-  return {
-    proportions: Object.fromEntries(TARGET_MODELS.map((model, index) => [model, best[index]!])),
-    mixture_gain: Math.max(0, bestValue - bestPure),
-    second_share: ordered[1] ?? 0,
-  }
-}
-
 function probabilitySummary(run: RunRecord, rows: StoredObservation[], seed: ScoringReleaseSeed): Record<string, unknown> {
   const enabled = run.config.probes.some((item) => ['rand_country', 'rand_bird', 'b80_letter_count'].includes(item.probe_id))
-  if (!enabled) return { enabled: false, probability_pass: false, evidence_insufficient: false }
+  if (!enabled) return {
+    enabled: false,
+    fingerprint_status: 'unclear',
+    fingerprint_model: null,
+    fingerprint_match: {},
+    probability_pass: false,
+    evidence_insufficient: false,
+    fingerprint_unclear_reasons: ['builtin_fingerprint_not_enabled'],
+  }
   const { calibration, required } = findCalibration(run, seed)
   const reasons: string[] = []
-  if (!calibration) reasons.push('no_exact_runtime_calibration')
-  else if (!calibration.formalEligible) reasons.push('baseline_calibration_gate_failed')
-  const cells: CellRuntime[] = []
+  if (!calibration) reasons.push('no_exact_runtime_contract')
+  else if (!calibration.formalEligible) reasons.push('runtime_reference_only')
+  const cells: Array<{ key: string; probeId: string; sampleCount: number; weight: number; scores: Record<string, number> }> = []
   for (const [key, rawRequired] of Object.entries(required)) {
     const requiredCount = Number(rawRequired)
     const seedCell: ScoringCellSeed | undefined = seed.cells.find((item) => `${item.probeId}|${item.profile}` === key)
-    if (!seedCell) { reasons.push(`baseline_cell_missing:${key}`); continue }
+    if (!seedCell) { reasons.push('baseline_cells_missing'); continue }
     const fitted = seedCell.fittedParameters
     const categories = Array.isArray(fitted['categories']) ? fitted['categories'].map(String) : []
-    const distributions = fitted['used_distributions'] as Record<string, Record<string, number>>
+    const distributions = fitted['model_distributions'] as Record<string, Record<string, number>>
     const cellRows = rows.filter((item) => `${item.probeId}|${item.profile}` === key && item.classification === 'category')
     const counts = Object.fromEntries(categories.map((category) => [category, 0])) as Record<string, number>
     for (const row of cellRows) {
@@ -262,45 +227,56 @@ function probabilitySummary(run: RunRecord, rows: StoredObservation[], seed: Sco
       counts[category] = (counts[category] ?? 0) + 1
     }
     const sampleCount = Object.values(counts).reduce((sum, value) => sum + value, 0)
-    if (sampleCount < requiredCount) reasons.push(`candidate_samples_incomplete:${key}`)
+    const minimumCompleted = Math.ceil(requiredCount * 0.9)
+    if (sampleCount < minimumCompleted) reasons.push('candidate_samples_incomplete')
     const scores = Object.fromEntries(TARGET_MODELS.map((model) => [
       model,
       Object.entries(counts).reduce((sum, [category, count]) => sum + count * safeLog(distributions[model]?.[category] ?? 0), 0) / Math.max(1, sampleCount),
     ]))
-    const threshold = Number(calibration?.oodThresholds[key] ?? Number.NEGATIVE_INFINITY)
-    const isolated = sampleCount >= requiredCount && Math.max(...Object.values(scores)) < threshold
-    cells.push({ key, probeId: seedCell.probeId, counts, sampleCount, complete: sampleCount >= requiredCount, weight: Number(fitted['weight'] ?? 0), isolated, distributions, scores })
+    cells.push({ key, probeId: seedCell.probeId, sampleCount, weight: Number(fitted['weight'] ?? 0), scores })
   }
-  if (cells.length && cells.every((cell) => cell.isolated)) reasons.push('all_formal_families_ood')
-  const totalScores = Object.fromEntries(TARGET_MODELS.map((model) => [model, safeLog(1 / 3)])) as Record<string, number>
-  for (const probeId of new Set(cells.filter((cell) => !cell.isolated).map((cell) => cell.probeId))) {
-    const family = cells.filter((cell) => cell.probeId === probeId && !cell.isolated)
+  const totalScores = Object.fromEntries(TARGET_MODELS.map((model) => [model, 0])) as Record<string, number>
+  let activeFamilies = 0
+  for (const probeId of new Set(cells.filter((cell) => cell.sampleCount > 0 && cell.weight > 0).map((cell) => cell.probeId))) {
+    const family = cells.filter((cell) => cell.probeId === probeId && cell.sampleCount > 0 && cell.weight > 0)
     const weightSum = family.reduce((sum, cell) => sum + cell.weight, 0)
     if (weightSum <= 0) continue
+    activeFamilies += 1
     const familyWeight = Math.min(1, Math.max(...family.map((cell) => cell.weight)))
     for (const model of TARGET_MODELS) {
       totalScores[model] = totalScores[model]! + familyWeight * family.reduce((sum, cell) => sum + cell.weight * cell.scores[model]!, 0) / weightSum
     }
   }
-  const temperature = Number(calibration?.thresholds['temperature'] ?? 1)
-  const probabilities = softmax(Object.fromEntries(TARGET_MODELS.map((model) => [model, totalScores[model]! / temperature])))
-  const ordered = [...TARGET_MODELS].toSorted((a, b) => totalScores[b]! - totalScores[a]!)
+  if (!activeFamilies) reasons.push('no_weighted_fingerprint_family')
+  const probabilities = activeFamilies
+    ? softmax(totalScores)
+    : Object.fromEntries(TARGET_MODELS.map((model) => [model, 1 / TARGET_MODELS.length]))
+  const ordered = [...TARGET_MODELS].toSorted((a, b) => probabilities[b]! - probabilities[a]!)
   const winner = ordered[0]!
-  const margin = totalScores[winner]! - totalScores[ordered[1]!]!
-  const fittedMixture = mixture(cells)
-  const formalReady = reasons.length === 0
-  const alertMargin = Number(calibration?.thresholds['alert_margin'] ?? Number.POSITIVE_INFINITY)
-  const passMargin = Number(calibration?.thresholds['pass_margin'] ?? Number.POSITIVE_INFINITY)
-  const mixtureThreshold = Number(calibration?.thresholds['mixture_gain_threshold'] ?? Number.POSITIVE_INFINITY)
-  const pureAlert = formalReady && winner !== run.model && margin >= alertMargin
-  const mixtureAlert = formalReady && fittedMixture.mixture_gain >= mixtureThreshold && fittedMixture.second_share >= 0.1
+  const thresholds = (calibration?.thresholds['strong_match'] ?? {}) as Record<string, number>
+  const formalReady = reasons.length === 0 && activeFamilies > 0
+  const winners = TARGET_MODELS.filter((model) => formalReady && probabilities[model]! > Number(thresholds[model] ?? 1))
+  const fingerprintStatus = winners.length === 1 ? 'strong_match' : 'unclear'
+  const fingerprintModel = winners.length === 1 ? winners[0]! : null
+  if (formalReady && winners.length === 0) reasons.push('no_model_reached_strong_match_threshold')
+  if (winners.length > 1) reasons.push('multiple_models_reached_threshold')
   return {
-    enabled: true, formal_eligible: formalReady, winner, score_margin: margin,
-    conditional_relative_probability: probabilities, pure_scores: totalScores,
-    pure_model_alert: pureAlert, mixture_alert: mixtureAlert,
-    probability_pass: formalReady && winner === run.model && margin >= passMargin && !mixtureAlert,
-    evidence_insufficient: !formalReady, evidence_insufficient_reasons: reasons,
-    mixture: fittedMixture,
+    enabled: true,
+    formal_eligible: formalReady,
+    winner,
+    fingerprint_status: fingerprintStatus,
+    fingerprint_model: fingerprintModel,
+    fingerprint_match: probabilities,
+    fingerprint_thresholds: thresholds,
+    fingerprint_official_eligible: formalReady,
+    fingerprint_unclear_reasons: [...new Set(reasons)],
+    conditional_relative_probability: probabilities,
+    pure_scores: totalScores,
+    pure_model_alert: fingerprintModel != null && fingerprintModel !== run.model,
+    mixture_alert: false,
+    probability_pass: fingerprintModel === run.model,
+    evidence_insufficient: !formalReady,
+    evidence_insufficient_reasons: [...new Set(reasons)],
   }
 }
 
@@ -309,28 +285,79 @@ export function scoreStoredRun(run: RunRecord, rows: StoredObservation[], seed: 
   const outputHard = rows.some((item) => item.probeId.startsWith('output_') && item.hardAnomaly)
   const coverageHard = rows.some((item) => item.probeId === 'juice_coverage' && item.hardAnomaly)
   const probability = probabilitySummary(run, rows, seed)
-  let verdict: string | null
+  const fingerprintStrong = probability['fingerprint_status'] === 'strong_match'
+  const fingerprintModel = typeof probability['fingerprint_model'] === 'string' ? probability['fingerprint_model'] : null
+  const fingerprintText = fingerprintStrong ? `指纹强烈指向 ${MODEL_LABELS[fingerprintModel ?? ''] ?? fingerprintModel}` : '指纹证据不明确'
+  let verdict: string
   if (juice['juice_all_unsuccessful']) verdict = '可能非GPT'
-  else if (juice['juice_mixed'] || outputHard || coverageHard) verdict = 'Juice混用'
-  else if (!juice['juice_pass']) verdict = null
-  else if (probability['enabled'] && (probability['pure_model_alert'] || probability['mixture_alert'])) verdict = '仅概率探针混用'
-  else if (!probability['enabled'] || probability['probability_pass']) verdict = '通过'
-  else verdict = 'Juice通过但概率探针证据不足'
+  else if (juice['juice_mixed'] || outputHard || coverageHard) verdict = `Juice与申报型号不一致；${fingerprintText}`
+  else if (!juice['juice_pass']) verdict = `Juice证据不足；${fingerprintText}`
+  else verdict = `Juice通过；${fingerprintText}`
 
+  const successful = rows.filter((item) => item.status === 'ok').length
   const errors = rows.filter((item) => item.status === 'error').length
+  const cancelled = rows.filter((item) => item.status === 'cancelled').length
   const status = errors === rows.length ? 'failed' : errors > 0 ? 'incomplete' : 'completed'
+  const attempts = rows.reduce((total, item) => total + Number(item.metadata['attempts_sent'] ?? 1), 0)
+  const retries = Math.max(0, attempts - rows.length)
+  const profileSummary: Record<string, { logical_tasks: number; successful: number; final_errors: number; cancelled: number }> = {}
+  for (const item of rows) {
+    const profile = profileSummary[item.profile] ?? { logical_tasks: 0, successful: 0, final_errors: 0, cancelled: 0 }
+    profile.logical_tasks += 1
+    if (item.status === 'ok') profile.successful += 1
+    else if (item.status === 'error') profile.final_errors += 1
+    else profile.cancelled += 1
+    profileSummary[item.profile] = profile
+  }
+  const errorGroups = new Map<string, {
+    code: string; message: string | null; http_status: number | null; retryable: boolean; count: number; attempts: number
+  }>()
+  for (const item of rows.filter((row) => row.status === 'error')) {
+    const code = item.safeError ?? 'unknown_error'
+    const message = typeof item.metadata['safe_message'] === 'string' ? item.metadata['safe_message'] : null
+    const httpStatus = typeof item.metadata['http_status'] === 'number' ? item.metadata['http_status'] : null
+    const retryable = item.metadata['retryable'] === true
+    const key = JSON.stringify([code, message, httpStatus, retryable])
+    const group = errorGroups.get(key) ?? { code, message, http_status: httpStatus, retryable, count: 0, attempts: 0 }
+    group.count += 1
+    group.attempts += Number(item.metadata['attempts_sent'] ?? 1)
+    errorGroups.set(key, group)
+  }
   return {
     status,
     summary: {
       overall_verdict: verdict,
-      verdict_available: verdict != null,
+      title_cn: verdict,
+      subtitle_cn: status === 'completed' ? '检测已完成，以下结论只适用于本次目标、配置和评分版本。' : '部分请求失败，请结合网络错误与逐请求观测阅读结论。',
+      verdict_available: true,
       operational_status: status,
       juice_summary: juice,
       output_integrity: { hard_anomaly: outputHard },
       coverage: { hard_anomaly: coverageHard },
       probability,
-      completed_requests: rows.length - errors,
+      fingerprint_summary: probability,
+      network_summary: {
+        logical_tasks: rows.length,
+        logical_completed: rows.length,
+        successful,
+        final_errors: errors,
+        cancelled,
+        http_attempts: attempts,
+        retries,
+        in_flight: 0,
+      },
+      profile_summary: profileSummary,
+      error_summary: [...errorGroups.values()],
+      completed_requests: rows.length,
+      successful_requests: successful,
       failed_requests: errors,
+      cancelled_requests: cancelled,
+      http_attempts: attempts,
+      retries,
+      limitations: [
+        '该结论只适用于本次目标、配置和评分版本。',
+        '行为指纹属于统计证据，不是底层模型路由的密码学证明。',
+      ],
     },
     observations: rows.map((item) => ({
       job_id: item.jobId,
@@ -342,6 +369,10 @@ export function scoreStoredRun(run: RunRecord, rows: StoredObservation[], seed: 
       hard_anomaly: item.hardAnomaly,
       elapsed_ms: item.elapsedMs,
       safe_error: item.safeError,
+      attempts_sent: Number(item.metadata['attempts_sent'] ?? 1),
+      http_status: item.metadata['http_status'] ?? null,
+      retryable: item.metadata['retryable'] ?? false,
+      safe_message: item.metadata['safe_message'] ?? null,
       metadata: item.metadata,
     })),
     storedObservations: rows,

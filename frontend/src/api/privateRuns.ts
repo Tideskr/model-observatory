@@ -8,7 +8,7 @@ export type PrivateRunStatus =
   | 'queued' | 'provisioning' | 'running' | 'scoring' | 'completed'
   | 'failed' | 'cancelled' | 'timed_out' | 'incomplete' | 'deleted'
 
-interface ApiErrorBody { detail?: string; code?: string }
+interface ApiErrorBody { detail?: string; code?: string; request_id?: string; status?: number; title?: string }
 type LoopbackRequestInit = RequestInit & { targetAddressSpace?: 'loopback' }
 
 function requestInit(apiOrigin: string, init: RequestInit = {}): LoopbackRequestInit {
@@ -20,12 +20,14 @@ function requestInit(apiOrigin: string, init: RequestInit = {}): LoopbackRequest
 export class PrivateRunApiError extends Error {
   readonly status: number
   readonly code: string
+  readonly requestId: string | null
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, requestId: string | null = null) {
     super(message)
     this.name = 'PrivateRunApiError'
     this.status = status
     this.code = code
+    this.requestId = requestId
   }
 }
 
@@ -33,7 +35,12 @@ async function json<T>(response: Response): Promise<T> {
   if (response.ok) return response.json() as Promise<T>
   let problem: ApiErrorBody = {}
   try { problem = await response.json() as ApiErrorBody } catch { /* Proxy failures can be non-JSON. */ }
-  throw new PrivateRunApiError(response.status, problem.code ?? 'request_failed', problem.detail ?? `请求失败（${response.status}）`)
+  throw new PrivateRunApiError(
+    response.status,
+    problem.code ?? 'request_failed',
+    problem.detail ?? `请求失败（${response.status}）`,
+    problem.request_id ?? response.headers.get('x-request-id'),
+  )
 }
 
 function apiConfig(config: RunConfig) {

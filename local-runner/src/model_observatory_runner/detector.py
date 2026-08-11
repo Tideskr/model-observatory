@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from copy import deepcopy
 import hashlib
 import json
 import math
@@ -33,13 +34,14 @@ from .presets import (
 )
 from .probability_model import COMPLETION_RATIO, ProbabilityModel, load_baseline, verify_baseline
 from .retention import RawRetention, RetentionWriteError
+from .release import release_file
 from .store import SQLiteStateStore
 from .transport import RequestCancellationController, StreamingTransport, TransportCancelled, TransportError
 from .utils import canonical_json, deterministic_job_id, normalize_api_base_url, sha256_text, utc_now
 from .verdict import build_overall_verdict
 
 
-DEFAULT_BASELINE = Path(__file__).with_name("baselines") / "trusted_fingerprint_v3.json"
+DEFAULT_BASELINE = release_file("fingerprint_baseline")
 TRANSIENT_STATUSES = {408, 429, 500, 502, 503, 504}
 CANCELLATION_POLL_SECONDS = 0.10
 CANCELLATION_GRACE_SECONDS = 3.0
@@ -982,6 +984,44 @@ class DetectorSession:
                 "cancelled": sum(row.get("status") == "cancelled" for row in values),
                 "fingerprint_windows": {key: value for key, value in window_states.items() if key.endswith("|" + profile)},
             }
+        observations = []
+        observation_fields = (
+            "job_id",
+            "probe_id",
+            "request_format",
+            "context_mode",
+            "effort",
+            "cycle",
+            "time",
+            "status",
+            "attempts_sent",
+            "classification",
+            "category",
+            "normalized_value",
+            "hard_anomaly",
+            "exact",
+            "expected",
+            "observed",
+            "http_status",
+            "elapsed_ms",
+            "streaming",
+            "stream_event_count",
+            "time_to_first_event_ms",
+            "answer_length",
+            "cancellation_category",
+            "mixed_models",
+        )
+        for row in completed_rows:
+            observation = {key: deepcopy(row[key]) for key in observation_fields if key in row}
+            observation["profile"] = f"{row.get('request_format')}+{row.get('context_mode')}"
+            error = row.get("error")
+            if isinstance(error, dict):
+                observation["safe_error"] = {
+                    key: deepcopy(error[key])
+                    for key in ("stage", "category", "retryable", "http_status", "attempt", "safe_message")
+                    if key in error
+                }
+            observations.append(observation)
         retention_manifest = self.retention.finalize() if self.retention is not None else None
         build_hash = hashlib.sha256()
         for name in ("detector.py", "juice.py", "probability_model.py", "store.py", "verdict.py"):
@@ -1011,6 +1051,7 @@ class DetectorSession:
             "reference_fingerprint_results": reference_fingerprint_results,
             "fingerprint_window_states": window_states,
             "profile_summary": profiles,
+            "observations": observations,
             "sticky_alerts": sticky,
             "network_summary": {
                 "logical_tasks": progress["planned"],

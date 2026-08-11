@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
+import { basename, dirname, resolve } from 'node:path'
 import type {
   ScoringCalibrationSeed,
   ScoringCellSeed,
@@ -7,22 +8,10 @@ import type {
   ScoringReleaseSeed,
   ScoringSignatureSeed,
   ScoringTemplateSeed,
+  VerdictRuleSeed,
 } from './types.js'
 
 type JsonObject = Record<string, unknown>
-
-const TRUSTED_CATALOG_SOURCE_SHA256 = '8cf89f903d467cc5fb0c461ec5154347fcb59e5aac6b036e79cf9bdd8b204eb8'
-const TRUSTED_BASELINE_SOURCE_SHA256 = 'a1de0b4cce26a6df3dfc59907a7b5043460f9cde3614d38d0919e98fd4ba2100'
-const TRUSTED_BASELINE_CONTENT_SHA256 = 'dd692466ea601d99b737edae66a35941f236d5e7426244f2c04e43f314f43851'
-
-const signatureValues: Record<string, Record<string, string>> = {
-  'gpt-5.6-sol': { low: '8', medium: '16', high: '40', xhigh: '128', max: '960' },
-  'gpt-5.6-terra': { low: '12', medium: '16', high: '32', xhigh: '84', max: '960' },
-  'gpt-5.6-luna': { low: '8', medium: '16', high: '48', xhigh: '128', max: '768' },
-  'gpt-5.5': { low: '12', medium: '24', high: '96', xhigh: '768' },
-  'gpt-5.4': { low: '12', medium: '20', high: '96', xhigh: '512' },
-  'gpt-5.4-mini': { low: '8', medium: '24', high: '64', xhigh: '768' },
-}
 
 function object(value: unknown, label: string): JsonObject {
   if (value == null || Array.isArray(value) || typeof value !== 'object') throw new Error(`${label} must be an object`)
@@ -38,16 +27,21 @@ function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
-function trustedSourceHash(value: string): string {
-  return sha256(value.replace(/\r\n/g, '\n'))
-}
-
 function parseJson(raw: string, label: string): JsonObject {
   try {
     return object(JSON.parse(raw), label)
   } catch (error) {
     throw new Error(`${label} is not valid JSON`, { cause: error })
   }
+}
+
+function verifyArtifact(root: string, manifest: JsonObject, name: string): Promise<{ raw: string; value: JsonObject }> {
+  const descriptor = object(object(manifest['artifacts'], 'manifest.artifacts')[name], `manifest.artifacts.${name}`)
+  const path = resolve(root, text(descriptor['file'], `${name}.file`))
+  return readFile(path, 'utf8').then((raw) => {
+    if (sha256(raw) !== text(descriptor['sha256'], `${name}.sha256`)) throw new Error(`${name} source hash mismatch`)
+    return { raw, value: parseJson(raw, name) }
+  })
 }
 
 function promptHash(prompt: string, expected: string, label: string): void {
@@ -58,7 +52,6 @@ function buildProbes(catalog: JsonObject, baseline: JsonObject): ScoringProbeSee
   const metadata = object(baseline['probe_metadata'], 'probe_metadata')
   const behavior = object(catalog['behavior_probes'], 'behavior_probes')
   const result: ScoringProbeSeed[] = []
-
   for (const [probeId, rawValue] of Object.entries(behavior)) {
     const value = object(rawValue, `behavior_probes.${probeId}`)
     const baselineValue = object(metadata[probeId], `probe_metadata.${probeId}`)
@@ -102,11 +95,7 @@ function buildProbes(catalog: JsonObject, baseline: JsonObject): ScoringProbeSee
       metadata: { effort, template_pool: effort, templates },
     })
   }
-
-  for (const [probeId, expected] of [
-    ['output_luna_48', '48'],
-    ['output_terra_32', '32'],
-  ] as const) {
+  for (const [probeId, expected] of [['output_luna_48', '48'], ['output_terra_32', '32']] as const) {
     const prompt = `Reply with exactly the two ASCII digits ${expected}. Do not add any other text.`
     result.push({
       probeId,
@@ -122,7 +111,6 @@ function buildProbes(catalog: JsonObject, baseline: JsonObject): ScoringProbeSee
       metadata: { expected, hard_anomaly_prefix: '40' },
     })
   }
-
   const coverage = object(catalog['coverage_probe'], 'coverage_probe')
   const messages = Array.isArray(coverage['messages']) ? coverage['messages'].map((item) => object(item, 'coverage message')) : []
   const developerPrompt = String(messages.find((item) => item['role'] === 'developer')?.['content'] ?? '')
@@ -145,34 +133,24 @@ function buildProbes(catalog: JsonObject, baseline: JsonObject): ScoringProbeSee
 
 function buildTemplates(catalog: JsonObject): ScoringTemplateSeed[] {
   const templates = object(catalog['templates'], 'templates')
-  const pools = object(catalog['pools'], 'pools')
-  return Object.entries(pools).flatMap(([effort, templateIds]) =>
+  return Object.entries(object(catalog['pools'], 'pools')).flatMap(([effort, templateIds]) =>
     (Array.isArray(templateIds) ? templateIds : []).map((rawTemplateId) => {
       const templateId = String(rawTemplateId)
       const value = object(templates[templateId], `templates.${templateId}`)
       const prompt = text(value['prompt'], `${templateId}.prompt`)
-      return {
-        probeId: `juice_${effort}`,
-        templateId,
-        prompt,
-        promptSha256: sha256(prompt),
-        metadata: value,
-      }
+      return { probeId: `juice_${effort}`, templateId, prompt, promptSha256: sha256(prompt), metadata: value }
     }),
   )
 }
 
-function buildSignatures(): ScoringSignatureSeed[] {
-  return Object.entries(signatureValues).flatMap(([modelId, values]) =>
-    Object.entries(values).map(([effort, expectedValue]) => ({
-      modelId,
-      effort,
-      expectedValue,
-      matchRule:
-        modelId === 'gpt-5.6-sol' && ['low', 'medium', 'high'].includes(effort)
-          ? ('exact_or_decimal_or_long_prefix' as const)
-          : ('exact' as const),
-    })),
+function buildSignatures(manifest: JsonObject): ScoringSignatureSeed[] {
+  return Object.entries(object(manifest['signatures'], 'manifest.signatures')).flatMap(([modelId, rawEfforts]) =>
+    Object.entries(object(rawEfforts, `signatures.${modelId}`)).map(([effort, rawSignature]) => {
+      const signature = object(rawSignature, `signatures.${modelId}.${effort}`)
+      const matchRule = text(signature['match_rule'], `${modelId}.${effort}.match_rule`)
+      if (!['exact', 'exact_or_decimal_or_long_prefix'].includes(matchRule)) throw new Error(`unsupported match rule: ${matchRule}`)
+      return { modelId, effort, expectedValue: text(signature['value'], `${modelId}.${effort}.value`), matchRule: matchRule as ScoringSignatureSeed['matchRule'] }
+    }),
   )
 }
 
@@ -197,77 +175,82 @@ function buildCells(baseline: JsonObject): ScoringCellSeed[] {
   })
 }
 
-function buildCalibrations(baseline: JsonObject): ScoringCalibrationSeed[] {
-  return Object.entries(object(baseline['calibrations'], 'calibrations')).map(([signature, rawValue]) => {
-    const value = object(rawValue, `calibrations.${signature}`)
-    if (text(value['runtime_signature'], `${signature}.runtime_signature`) !== signature) {
-      throw new Error(`${signature} calibration runtime signature mismatch`)
-    }
-    const thresholds = {
-      tau: value['tau'],
-      pass_margin: value['pass_margin'],
-      alert_margin: value['alert_margin'],
-      mixture_gain_threshold: value['mixture_gain_threshold'],
-      temperature: value['temperature'],
-    }
+function buildCalibrations(manifest: JsonObject, baseline: JsonObject): ScoringCalibrationSeed[] {
+  const thresholds = object(manifest['formal_thresholds'], 'manifest.formal_thresholds')
+  return Object.entries(object(baseline['runtime_contracts'], 'runtime_contracts')).map(([signature, rawContract]) => {
+    const contract = object(rawContract, `runtime_contracts.${signature}`)
+    if (contract['runtime_signature'] !== signature) throw new Error(`${signature} runtime signature mismatch`)
+    const decisionLevel = text(contract['decision_level'], `${signature}.decision_level`)
     return {
       runtimeSignature: signature,
-      runtimeName: text(value['runtime_name'], `${signature}.runtime_name`),
-      formalEligible: value['formal_eligible'] === true,
-      requiredSamples: object(value['required_samples'], `${signature}.required_samples`),
-      exactContracts: object(value['exact_contracts'], `${signature}.exact_contracts`),
-      thresholds,
-      oodThresholds: object(value['ood_thresholds'], `${signature}.ood_thresholds`),
-      details: value,
+      runtimeName: text(contract['runtime_name'], `${signature}.runtime_name`),
+      formalEligible: contract['formal_eligible'] === true,
+      requiredSamples: object(contract['required_samples'], `${signature}.required_samples`),
+      exactContracts: object(contract['exact_contracts'], `${signature}.exact_contracts`),
+      thresholds: { strong_match: object(thresholds[decisionLevel], `formal_thresholds.${decisionLevel}`) },
+      oodThresholds: {},
+      details: contract,
     }
   })
 }
 
-export async function importLegacyScoringRelease(
-  catalogPath: string,
-  baselinePath: string,
-): Promise<ScoringReleaseSeed> {
-  const [catalogRaw, baselineRaw] = await Promise.all([
-    readFile(catalogPath, 'utf8'),
-    readFile(baselinePath, 'utf8'),
-  ])
-  if (trustedSourceHash(catalogRaw) !== TRUSTED_CATALOG_SOURCE_SHA256) throw new Error('Legacy runtime catalog source hash mismatch')
-  if (trustedSourceHash(baselineRaw) !== TRUSTED_BASELINE_SOURCE_SHA256) throw new Error('Legacy baseline source hash mismatch')
-  const catalog = parseJson(catalogRaw, 'runtime catalog')
-  const baseline = parseJson(baselineRaw, 'trusted likelihood baseline')
-  if (catalog['schema_version'] !== 1) throw new Error('unsupported Legacy catalog schema')
-  if (baseline['schema_version'] !== 2) throw new Error('unsupported Legacy baseline schema')
-  if (baseline['content_sha256'] !== TRUSTED_BASELINE_CONTENT_SHA256) throw new Error('Legacy baseline content hash mismatch')
-  const models = Array.isArray(baseline['models']) ? baseline['models'].map(String) : []
-  if (models.join(',') !== 'gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna') {
-    throw new Error('unexpected target model set in Legacy baseline')
-  }
+function buildVerdictRules(manifest: JsonObject): VerdictRuleSeed[] {
+  const rows = Array.isArray(manifest['verdict_rules']) ? manifest['verdict_rules'] : []
+  return rows.map((raw) => {
+    const value = object(raw, 'verdict rule')
+    return {
+      priority: Number(value['priority']),
+      ruleId: text(value['rule_id'], 'verdict rule id'),
+      title: value['title'] == null ? null : String(value['title']),
+      predicateId: text(value['predicate_id'], 'verdict predicate id'),
+      severe: value['severe'] === true,
+    }
+  })
+}
 
+export async function importScoringRelease(manifestPath: string): Promise<ScoringReleaseSeed> {
+  const manifestRaw = await readFile(manifestPath, 'utf8')
+  const manifest = parseJson(manifestRaw, 'scoring release manifest')
+  if (manifest['schema_version'] !== 1) throw new Error('unsupported scoring release manifest schema')
+  const root = dirname(manifestPath)
+  const [catalogResult, baselineResult] = await Promise.all([
+    verifyArtifact(root, manifest, 'runtime_catalog'),
+    verifyArtifact(root, manifest, 'fingerprint_baseline'),
+  ])
+  const catalog = catalogResult.value
+  const baseline = baselineResult.value
+  if (catalog['schema_version'] !== 1) throw new Error('unsupported runtime catalog schema')
+  if (baseline['schema_version'] !== 3) throw new Error('unsupported fingerprint baseline schema')
+  const baselineDescriptor = object(object(manifest['artifacts'], 'manifest.artifacts')['fingerprint_baseline'], 'fingerprint baseline descriptor')
+  if (baseline['content_sha256'] !== baselineDescriptor['content_sha256']) throw new Error('fingerprint baseline content hash mismatch')
+  const modelGroups = object(manifest['models'], 'manifest.models')
+  const targets = Array.isArray(modelGroups['target']) ? modelGroups['target'].map(String) : []
+  if (targets.join(',') !== 'gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna') throw new Error('unexpected target model set')
+  const legacy = Array.isArray(modelGroups['legacy']) ? modelGroups['legacy'].map(String) : []
   return {
-    id: text(baseline['baseline_id'], 'baseline_id'),
-    schemaVersion: Number(baseline['schema_version']),
-    scoringVersion: text(baseline['scoring_version'], 'scoring_version'),
-    contentSha256: text(baseline['content_sha256'], 'content_sha256'),
-    sourceSha256: sha256(baselineRaw),
+    id: text(manifest['release_id'], 'release_id'),
+    schemaVersion: Number(manifest['schema_version']),
+    scoringVersion: text(manifest['scoring_version'], 'scoring_version'),
+    contentSha256: sha256(manifestRaw),
+    sourceSha256: sha256(`${sha256(catalogResult.raw)}:${sha256(baselineResult.raw)}`),
     formalEligible: baseline['formal_eligible'] === true,
-    thresholdPolicy: object(baseline['threshold_policy'], 'threshold_policy'),
+    thresholdPolicy: {
+      formal_thresholds: object(manifest['formal_thresholds'], 'formal_thresholds'),
+      completion_ratio: baseline['completion_ratio'],
+      weight_formula: baseline['weight_formula'],
+    },
     artifact: baseline,
-    models: Object.keys(signatureValues).map((modelId) => ({
-      modelId,
-      modelKind: models.includes(modelId) ? 'target' : 'legacy',
-    })),
+    models: [...targets.map((modelId) => ({ modelId, modelKind: 'target' as const })), ...legacy.map((modelId) => ({ modelId, modelKind: 'legacy' as const }))],
     probes: buildProbes(catalog, baseline),
     templates: buildTemplates(catalog),
-    signatures: buildSignatures(),
+    signatures: buildSignatures(manifest),
     cells: buildCells(baseline),
-    calibrations: buildCalibrations(baseline),
-    verdictRules: [
-      { priority: 10, ruleId: 'all_juice_unsuccessful', title: '可能非GPT', predicateId: 'juice_all_unsuccessful', severe: true },
-      { priority: 20, ruleId: 'deterministic_anomaly', title: 'Juice混用', predicateId: 'juice_mixed_or_deterministic_anomaly', severe: true },
-      { priority: 30, ruleId: 'juice_incomplete', title: null, predicateId: 'juice_not_passed', severe: false },
-      { priority: 40, ruleId: 'probability_alert', title: '仅概率探针混用', predicateId: 'juice_pass_and_probability_alert', severe: true },
-      { priority: 50, ruleId: 'pass', title: '通过', predicateId: 'juice_pass_and_probability_pass_or_disabled', severe: false },
-      { priority: 60, ruleId: 'probability_insufficient', title: 'Juice通过但概率探针证据不足', predicateId: 'fallback', severe: false },
-    ],
+    calibrations: buildCalibrations(manifest, baseline),
+    verdictRules: buildVerdictRules(manifest),
   }
+}
+
+export function defaultScoringReleaseManifest(cwd = process.cwd()): string {
+  const root = basename(cwd) === 'backend' ? resolve(cwd, '..') : cwd
+  return resolve(root, 'scoring-releases', 'gpt56-v3', 'manifest.json')
 }

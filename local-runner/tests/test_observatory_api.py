@@ -13,10 +13,12 @@ from urllib.request import Request, urlopen
 
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
-from gpt56_vnext.observatory_api import ApiProblem, ObservatoryApi, translate_run_config  # noqa: E402
-from gpt56_vnext.server import create_server  # noqa: E402
+from model_observatory_runner.api import ApiProblem, ObservatoryApi, translate_run_config  # noqa: E402
+from model_observatory_runner.juice import classify_juice_answer  # noqa: E402
+from model_observatory_runner.release import release_file  # noqa: E402
+from model_observatory_runner.server import create_server  # noqa: E402
 
 
 def quote_body() -> dict[str, object]:
@@ -88,6 +90,15 @@ class MockResponsesHandler(BaseHTTPRequestHandler):
 
 
 class ObservatoryApiTests(unittest.TestCase):
+    def test_shared_juice_conformance_cases(self) -> None:
+        cases = json.loads(release_file("conformance").read_text(encoding="utf-8"))["juice_cases"]
+        for case in cases:
+            with self.subTest(case=case):
+                result = classify_juice_answer(case["effort"], case["answer"], case["claimed_model"])
+                self.assertEqual(result["normalized_value"], case["normalized_value"])
+                self.assertEqual(result["classification"], case["classification"])
+                self.assertEqual(result["mixed_models"], case["mixed_models"])
+
     def test_translates_native_config_and_restricts_b80_profile(self) -> None:
         normalized, legacy = translate_run_config({
             "probes": [{"probe_id": "b80_letter_count", "requests": 3}],
@@ -143,6 +154,35 @@ class ObservatoryApiTests(unittest.TestCase):
         self.assertEqual(report["summary"]["overall_verdict"], "Juice通过；指纹证据不明确")
         self.assertEqual(len(report["observations"]), 1)
 
+        failed_legacy = dict(state.store.value)
+        failed_legacy["network_summary"] = {
+            "logical_tasks": 1,
+            "logical_completed": 1,
+            "successful": 0,
+            "final_errors": 1,
+            "http_attempts": 2,
+            "retries": 1,
+        }
+        failed_legacy["observations"] = [{
+            "job_id": "job-1",
+            "probe_id": "juice_high",
+            "profile": "normal+no_history",
+            "status": "error",
+            "attempts_sent": 2,
+            "safe_error": {
+                "category": "upstream_http_error",
+                "http_status": 401,
+                "retryable": False,
+                "safe_message": "Upstream rejected the credential.",
+            },
+        }]
+        state.store.value = failed_legacy
+        api._cache_report(api.runs[created["run_id"]], failed_legacy)
+        failed_report = api.report(created["run_id"], created["owner_token"], state)
+        self.assertEqual(failed_report["status"], "failed")
+        self.assertEqual(failed_report["summary"]["error_summary"][0]["http_status"], 401)
+        self.assertEqual(failed_report["summary"]["error_summary"][0]["attempts"], 2)
+
 
 class RunnerHttpTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -178,16 +218,21 @@ class RunnerHttpTests(unittest.TestCase):
         with self.request("/status") as response:
             body = json.load(response)
             self.assertEqual(body["service"], "model-observatory-runner")
+            self.assertEqual(body["protocol_version"], "private-runs-v1")
+            self.assertEqual(body["scoring_release_id"], "stage-c-trusted-fingerprint-v3")
+            self.assertTrue(body["capabilities"]["detailed_progress"])
             self.assertEqual(response.headers["Access-Control-Allow-Origin"], "https://check.skr.moe")
             self.assertEqual(response.headers["Access-Control-Allow-Private-Network"], "true")
         with self.request("/api/v1/private-runs/quote", method="OPTIONS") as response:
             self.assertEqual(response.status, 204)
             self.assertIn("Idempotency-Key", response.headers["Access-Control-Allow-Headers"])
+        with self.assertRaises(HTTPError) as missing_ui:
+            self.request("/")
+        self.assertEqual(missing_ui.exception.code, 404)
 
-    def test_rejects_untrusted_origin_and_accepts_quote(self) -> None:
-        with self.assertRaises(HTTPError) as rejected:
-            self.request("/status", origin="https://attacker.example")
-        self.assertEqual(rejected.exception.code, 403)
+    def test_accepts_any_web_origin_and_accepts_quote(self) -> None:
+        with self.request("/status", origin="https://another-compatible-site.example") as response:
+            self.assertEqual(response.headers["Access-Control-Allow-Origin"], "https://another-compatible-site.example")
         with self.request("/api/v1/private-runs/quote", method="POST", body=quote_body()) as response:
             body = json.load(response)
             self.assertEqual(body["model"], "gpt-5.6-sol")

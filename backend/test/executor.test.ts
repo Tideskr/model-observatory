@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { parseSseResponse, TransportError } from '../src/executor/normal-transport.js'
+import { createPinnedLookup, parseSseResponse, TransportError } from '../src/executor/normal-transport.js'
 import { isBlockedAddress } from '../src/executor/ssrf.js'
 
 test('SSRF address policy blocks private, metadata, loopback, and documentation ranges', () => {
@@ -10,6 +10,19 @@ test('SSRF address policy blocks private, metadata, loopback, and documentation 
   assert.equal(isBlockedAddress('8.8.8.8'), false)
   assert.equal(isBlockedAddress('::1'), true)
   assert.equal(isBlockedAddress('2001:4860:4860::8888'), false)
+})
+
+test('pinned DNS lookup supports Node single-address and all-address calls', () => {
+  const lookup = createPinnedLookup({ address: '8.8.8.8', family: 4 })
+  lookup('ignored.example', { all: false }, (error, address, family) => {
+    assert.equal(error, null)
+    assert.equal(address, '8.8.8.8')
+    assert.equal(family, 4)
+  })
+  lookup('ignored.example', { all: true }, (error, addresses) => {
+    assert.equal(error, null)
+    assert.deepEqual(addresses, [{ address: '8.8.8.8', family: 4 }])
+  })
 })
 
 test('Responses SSE parser requires a terminal event and extracts output', () => {

@@ -8,26 +8,17 @@ import math
 from pathlib import Path
 from typing import Any, Iterable
 
+from .release import load_release_manifest
 from .utils import canonical_json, softmax
 
 
 SCHEMA_VERSION = 3
 SCORING_VERSION = "trusted-fingerprint-v3"
-MODELS = ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
+_RELEASE = load_release_manifest()
+MODELS = tuple(_RELEASE["models"]["target"])
 SMOOTHING = 0.5
 COMPLETION_RATIO = 0.90
-FORMAL_THRESHOLDS = {
-    "medium": {
-        "gpt-5.6-sol": 0.70,
-        "gpt-5.6-terra": 0.75,
-        "gpt-5.6-luna": 0.90,
-    },
-    "high": {
-        "gpt-5.6-sol": 0.95,
-        "gpt-5.6-terra": 0.90,
-        "gpt-5.6-luna": 0.90,
-    },
-}
+FORMAL_THRESHOLDS = _RELEASE["formal_thresholds"]
 
 
 def _safe_log(value: float) -> float:

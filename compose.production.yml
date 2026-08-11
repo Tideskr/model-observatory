@@ -9,7 +9,7 @@ x-app-environment: &app-environment
   DATABASE_SSL: "false"
   LOG_LEVEL: info
   ENABLE_API_DOCS: "false"
-  SCORING_RELEASE_ID: stage-c-trusted-likelihood-v2
+  SCORING_RELEASE_ID: stage-c-trusted-fingerprint-v3
   REPOSITORY_URL: https://github.com/Tideskr/model-observatory
   TRUST_PROXY: "1"
   FRONTEND_DIST_DIR: /app/public

@@ -2,7 +2,7 @@ import https from 'node:https'
 import type { LookupFunction } from 'node:net'
 import { MAX_OUTPUT_TOKENS } from '../domain/run-limits.js'
 import { AppError } from '../errors.js'
-import { resolvePublicTarget } from './ssrf.js'
+import { resolvePublicTarget, type PinnedAddress } from './ssrf.js'
 
 const MAX_RESPONSE_BYTES = 1024 * 1024
 const REQUEST_TIMEOUT_MS = 60_000
@@ -29,10 +29,57 @@ export class TransportError extends Error {
     public readonly category: string,
     public readonly retryable: boolean,
     public readonly statusCode: number | null = null,
+    detail?: string,
   ) {
-    super(category)
+    super(detail ?? transportErrorMessage(category, statusCode))
     this.name = 'TransportError'
   }
+}
+
+export function createPinnedLookup(pinned: PinnedAddress): LookupFunction {
+  return (_hostname, options, callback) => {
+    if (options.all) {
+      callback(null, [{ address: pinned.address, family: pinned.family }])
+      return
+    }
+    callback(null, pinned.address, pinned.family)
+  }
+}
+
+function transportErrorMessage(category: string, statusCode: number | null): string {
+  const labels: Record<string, string> = {
+    invalid_response_stream: 'The upstream returned a malformed SSE stream.',
+    stream_without_terminal_response: 'The upstream stream ended without a terminal response event.',
+    upstream_response_failed: 'The upstream Responses request reported a failed terminal state.',
+    upstream_response_incomplete: 'The upstream Responses request reported an incomplete terminal state.',
+    response_too_large: 'The upstream response exceeded the 1 MiB safety limit.',
+    upstream_http_error: 'The upstream returned a non-success HTTP status.',
+    invalid_upstream_response: 'The upstream response was neither valid Responses JSON nor valid SSE.',
+    connection_or_tls_error: 'The worker could not connect to the target or establish trusted TLS.',
+  }
+  const suffix = statusCode == null ? '' : ` HTTP status: ${statusCode}.`
+  return `${labels[category] ?? category}${suffix}`
+}
+
+function connectionProblem(error: unknown): string {
+  const code = error != null && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+    ? error.code.slice(0, 64)
+    : ''
+  const base = transportErrorMessage('connection_or_tls_error', null)
+  return code ? `${base} Network error code: ${code}.` : base
+}
+
+function upstreamProblem(raw: string, statusCode: number): string | undefined {
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>
+    const error = value['error'] != null && typeof value['error'] === 'object' ? value['error'] as Record<string, unknown> : value
+    const code = typeof error['code'] === 'string' ? error['code'].slice(0, 128) : ''
+    const message = typeof error['message'] === 'string'
+      ? Array.from(error['message'].slice(0, 500), (character) => character.charCodeAt(0) < 32 ? ' ' : character).join('')
+      : ''
+    if (code || message) return `Upstream HTTP ${statusCode}${code ? ` (${code})` : ''}: ${message || 'request rejected'}`
+  } catch { /* Non-JSON error bodies are intentionally not reflected. */ }
+  return undefined
 }
 
 function outputText(response: Record<string, unknown>): string {
@@ -107,9 +154,7 @@ export async function sendNormalRequest(input: TransportRequest): Promise<Transp
   const started = Date.now()
 
   return new Promise<TransportResult>((resolve, reject) => {
-    const lookup: LookupFunction = (_hostname, _options, callback) => {
-      callback(null, pinned.address, pinned.family)
-    }
+    const lookup = createPinnedLookup(pinned)
     const request = https.request(
       {
         protocol: 'https:',
@@ -147,7 +192,12 @@ export async function sendNormalRequest(input: TransportRequest): Promise<Transp
         response.on('error', reject)
         response.on('end', () => {
           if (statusCode < 200 || statusCode >= 300) {
-            reject(new TransportError('upstream_http_error', [408, 429, 500, 502, 503, 504].includes(statusCode), statusCode))
+            reject(new TransportError(
+              'upstream_http_error',
+              [408, 429, 500, 502, 503, 504].includes(statusCode),
+              statusCode,
+              upstreamProblem(Buffer.concat(chunks).toString('utf8'), statusCode),
+            ))
             return
           }
           const raw = Buffer.concat(chunks).toString('utf8')
@@ -169,7 +219,7 @@ export async function sendNormalRequest(input: TransportRequest): Promise<Transp
       },
     )
     request.on('error', (error) => {
-      reject(error instanceof TransportError ? error : new TransportError('connection_or_tls_error', true))
+      reject(error instanceof TransportError ? error : new TransportError('connection_or_tls_error', true, null, connectionProblem(error)))
     })
     request.end(payload)
   })

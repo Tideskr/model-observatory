@@ -2,9 +2,9 @@
  *
  * The archived detector never faced this problem: it served its own page from
  * 127.0.0.1, so the browser and the runner were same-origin. A hosted page
- * reaching http://127.0.0.1 is a cross-origin, private-network request — the
- * runner has to answer with permissive CORS (and, in Chromium, Private Network
- * Access) headers for this probe to succeed.
+ * reaching http://127.0.0.1 is a cross-origin, private-network request. A
+ * compatible runner reflects any valid web Origin and answers the browser's
+ * Private Network Access preflight.
  *
  * Failure is not an error state: it simply means "no runner", which the page
  * handles by offering the download.
@@ -16,7 +16,7 @@ export type RunnerState =
   /** Probe has not finished yet. */
   | { status: 'checking' }
   /** Runner answered — everything runs locally, key never leaves the machine. */
-  | { status: 'present'; version: string }
+  | { status: 'present'; version: string; capabilities: Record<string, boolean> }
   /** No runner. The run is blocked until one is installed or remote is chosen. */
   | { status: 'absent' }
   /** User explicitly accepted sending credentials to the project's server. */
@@ -25,6 +25,7 @@ export type RunnerState =
 interface RunnerStatusResponse {
   service?: string
   version?: string
+  capabilities?: Record<string, boolean>
 }
 
 const PROBE_TIMEOUT_MS = 800
@@ -45,7 +46,7 @@ export async function detectLocalRunner(): Promise<RunnerState> {
     const body = (await response.json()) as RunnerStatusResponse
     if (body.service !== 'model-observatory-runner') return { status: 'absent' }
 
-    return { status: 'present', version: body.version ?? 'unknown' }
+    return { status: 'present', version: body.version ?? 'unknown', capabilities: body.capabilities ?? {} }
   } catch {
     // Timeout, connection refused, CORS rejection — all mean "no usable runner".
     return { status: 'absent' }
@@ -54,7 +55,7 @@ export async function detectLocalRunner(): Promise<RunnerState> {
 
 /** Native replay needs raw TCP/TLS control; only the local runner can do it. */
 export function supportsNativeFormat(state: RunnerState): boolean {
-  return state.status === 'present'
+  return state.status === 'present' && state.capabilities['native_codex'] === true
 }
 
 /** Whether credentials would leave the user's machine under this state. */

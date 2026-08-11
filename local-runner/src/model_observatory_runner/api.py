@@ -11,10 +11,10 @@ from urllib.parse import urlsplit
 import uuid
 
 from .utils import normalize_api_base_url, utc_now
+from .release import SCORING_RELEASE_ID
 
 
 DISCLOSURE_VERSION = "remote-normal-v1"
-SCORING_RELEASE_ID = "gpt56-detector-4.1.1"
 VALID_MODELS = {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"}
 VALID_FORMATS = {"normal", "native_codex"}
 VALID_CONTEXTS = {"no_history", "fixed_32k_history"}
@@ -296,7 +296,23 @@ class ObservatoryApi:
             "status": "running",
             "created_at": utc_now(),
             "expires_at": _expires(24 * 60 * 60),
-            "events": [{"id": 1, "type": "status", "payload": {"status": "running", "completed": 0, "total": quote["estimate"]["requests"]}}],
+            "events": [{
+                "id": 1,
+                "type": "status",
+                "payload": {
+                    "status": "running",
+                    "phase": "executing",
+                    "completed": 0,
+                    "total": quote["estimate"]["requests"],
+                    "successful": 0,
+                    "errors": 0,
+                    "cancelled": 0,
+                    "pending": quote["estimate"]["requests"],
+                    "in_flight": 0,
+                    "http_attempts": 0,
+                    "retries": 0,
+                },
+            }],
             "last_snapshot": None,
             "report": None,
         }
@@ -368,7 +384,21 @@ class ObservatoryApi:
         progress = current.get("progress") if isinstance(current.get("progress"), dict) else {}
         completed = int(progress.get("logical_completed") or 0)
         total = int(progress.get("planned") or run["quote"]["estimate"]["requests"])
-        snapshot = (status, completed, total)
+        payload = {
+            "status": status,
+            "phase": "finished" if status in TERMINAL_STATUSES else "executing",
+            "completed": completed,
+            "total": total,
+            "successful": int(progress.get("successful") or 0),
+            "errors": int(progress.get("errors") or 0),
+            "cancelled": int(progress.get("cancelled") or 0),
+            "pending": int(progress.get("pending") or max(0, total - completed)),
+            "in_flight": int(progress.get("in_flight") or 0),
+            "http_attempts": int(progress.get("http_attempts") or 0),
+            "retries": int(progress.get("retries") or 0),
+            "updated_at": progress.get("updated_at") or current.get("updated_at"),
+        }
+        snapshot = tuple(payload.items())
         with self.lock:
             if snapshot != run["last_snapshot"]:
                 run["status"] = status
@@ -376,7 +406,7 @@ class ObservatoryApi:
                 run["events"].append({
                     "id": run["events"][-1]["id"] + 1,
                     "type": event_type,
-                    "payload": {"status": status, "completed": completed, "total": total},
+                    "payload": payload,
                 })
                 run["last_snapshot"] = snapshot
 
@@ -393,10 +423,17 @@ class ObservatoryApi:
             self._cache_failure(run, str(current.get("error") or "local detector failed"))
 
     def _cache_report(self, run: dict[str, Any], legacy: dict[str, Any]) -> None:
-        status = "cancelled" if legacy.get("run_stopped") else "completed"
         network = legacy.get("network_summary") if isinstance(legacy.get("network_summary"), dict) else {}
-        if not legacy.get("run_stopped") and int(network.get("logical_completed") or 0) < int(network.get("logical_tasks") or 0):
+        if legacy.get("run_stopped"):
+            status = "cancelled"
+        elif int(network.get("logical_completed") or 0) < int(network.get("logical_tasks") or 0):
             status = "incomplete"
+        elif int(network.get("successful") or 0) == 0 and int(network.get("final_errors") or 0) > 0:
+            status = "failed"
+        elif int(network.get("final_errors") or 0) > 0:
+            status = "incomplete"
+        else:
+            status = "completed"
         summary_keys = (
             "overall_verdict",
             "outcome_code",
@@ -414,20 +451,60 @@ class ObservatoryApi:
             "limitations",
         )
         summary = {key: deepcopy(legacy[key]) for key in summary_keys if key in legacy}
-        observations = []
-        profiles = legacy.get("profile_summary")
-        if isinstance(profiles, dict):
-            observations = [
-                {"profile": profile, **deepcopy(value)}
-                for profile, value in profiles.items()
-                if isinstance(value, dict)
-            ]
+        error_groups: dict[tuple[Any, ...], dict[str, Any]] = {}
+        raw_observations = legacy.get("observations")
+        if isinstance(raw_observations, list):
+            for value in raw_observations:
+                if not isinstance(value, dict) or value.get("status") != "error":
+                    continue
+                error = value.get("safe_error") if isinstance(value.get("safe_error"), dict) else {}
+                key = (
+                    error.get("category") or "unknown_error",
+                    error.get("safe_message"),
+                    error.get("http_status"),
+                    bool(error.get("retryable")),
+                )
+                group = error_groups.setdefault(key, {
+                    "code": key[0],
+                    "message": key[1],
+                    "http_status": key[2],
+                    "retryable": key[3],
+                    "count": 0,
+                    "attempts": 0,
+                })
+                group["count"] += 1
+                group["attempts"] += int(value.get("attempts_sent") or 1)
+        summary["error_summary"] = list(error_groups.values())
+        network = legacy.get("network_summary") if isinstance(legacy.get("network_summary"), dict) else {}
+        summary.update({
+            "verdict_available": legacy.get("overall_verdict") is not None,
+            "operational_status": status,
+            "completed_requests": int(network.get("logical_completed") or 0),
+            "successful_requests": int(network.get("successful") or 0),
+            "failed_requests": int(network.get("final_errors") or 0),
+            "cancelled_requests": int(network.get("cancelled") or 0),
+            "http_attempts": int(network.get("http_attempts") or 0),
+            "retries": int(network.get("retries") or 0),
+        })
+        if "output_integrity_summary" in summary:
+            summary["output_integrity"] = deepcopy(summary["output_integrity_summary"])
+        if "coverage_summary" in summary:
+            summary["coverage"] = deepcopy(summary["coverage_summary"])
+        observations = deepcopy(legacy.get("observations")) if isinstance(legacy.get("observations"), list) else []
+        if not observations:
+            profiles = legacy.get("profile_summary")
+            if isinstance(profiles, dict):
+                observations = [
+                    {"profile": profile, **deepcopy(value)}
+                    for profile, value in profiles.items()
+                    if isinstance(value, dict)
+                ]
         report = {
             "api_version": "v1",
             "run_id": run["run_id"],
             "status": status,
             "terminal": True,
-            "scoring_release_id": f"{SCORING_RELEASE_ID}:{legacy.get('scoring_version', 'unknown')}",
+            "scoring_release_id": SCORING_RELEASE_ID,
             "target": {"origin": run["quote"]["target_origin"], "model": run["quote"]["model"]},
             "summary": summary,
             "observations": observations,
@@ -445,7 +522,24 @@ class ObservatoryApi:
             "terminal": True,
             "scoring_release_id": SCORING_RELEASE_ID,
             "target": {"origin": run["quote"]["target_origin"], "model": run["quote"]["model"]},
-            "summary": {"overall_verdict": "检测失败", "error": detail},
+            "summary": {
+                "overall_verdict": "检测失败",
+                "title_cn": "检测失败",
+                "subtitle_cn": detail,
+                "verdict_available": False,
+                "operational_status": "failed",
+                "safe_error": "local_runner_failed",
+                "completed_requests": 0,
+                "successful_requests": 0,
+                "failed_requests": 0,
+                "error_detail": {
+                    "stage": "local_runner",
+                    "code": "local_runner_failed",
+                    "status_code": None,
+                    "retryable": False,
+                    "message": detail,
+                },
+            },
             "observations": [],
             "created_at": utc_now(),
         }

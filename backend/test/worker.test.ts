@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { resolve } from 'node:path'
 import { test } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
 import { loadConfig } from '../src/config.js'
 import { buildRunJobs } from '../src/executor/job-plan.js'
 import { TransportError } from '../src/executor/normal-transport.js'
-import { importLegacyScoringRelease } from '../src/scoring/legacy-import.js'
+import { defaultScoringReleaseManifest, importScoringRelease } from '../src/scoring/release-import.js'
 import { scoreObservation } from '../src/scoring/score.js'
 import { createMemoryServices } from '../src/services.js'
 import { LeaseLostError, type RunRecord } from '../src/store/run-store.js'
@@ -21,8 +20,7 @@ const workerConfig = loadConfig({
 
 test('worker executes, scores, persists a sanitized report, and destroys the credential', async () => {
   const services = createMemoryServices(workerConfig)
-  const root = resolve(process.cwd(), '..', 'Legacy', 'gpt56_vnext', 'baselines')
-  const seed = await importLegacyScoringRelease(resolve(root, 'runtime_catalog.json'), resolve(root, 'trusted_likelihood_v2.json'))
+  const seed = await importScoringRelease(defaultScoringReleaseManifest())
   const expiresAt = new Date(Date.now() + 60_000)
   const secret = 'secret-key-that-must-not-enter-the-report'
   const credentialHandle = await services.credentialVault.put(secret, 'quote-test', expiresAt)
@@ -74,7 +72,7 @@ test('worker executes, scores, persists a sanitized report, and destroys the cre
   assert.equal(await worker.runOnce(), true)
   assert.equal((await services.runStore.get(run.id))?.status, 'completed')
   const report = await services.runStore.getReport(run.id)
-  assert.equal(report?.summary['overall_verdict'], '通过')
+  assert.equal(report?.summary['overall_verdict'], 'Juice通过；指纹证据不明确')
   assert.equal(report?.observations.length, 14)
   assert.equal(JSON.stringify(report).includes(secret), false)
   await assert.rejects(() => services.credentialVault.read(credentialHandle))
@@ -83,8 +81,7 @@ test('worker executes, scores, persists a sanitized report, and destroys the cre
 
 test('worker retry attempts are durably bounded per job', async () => {
   const services = createMemoryServices(workerConfig)
-  const root = resolve(process.cwd(), '..', 'Legacy', 'gpt56_vnext', 'baselines')
-  const seed = await importLegacyScoringRelease(resolve(root, 'runtime_catalog.json'), resolve(root, 'trusted_likelihood_v2.json'))
+  const seed = await importScoringRelease(defaultScoringReleaseManifest())
   const expiresAt = new Date(Date.now() + 60_000)
   const credentialHandle = await services.credentialVault.put('retry-test-secret', 'quote-retry', expiresAt)
   const run: RunRecord = {
@@ -112,13 +109,30 @@ test('worker retry attempts are durably bounded per job', async () => {
   assert.equal(await worker.runOnce(), true)
   assert.equal(attempts, 3)
   assert.equal((await services.runStore.get(run.id))?.status, 'failed')
+  const report = await services.runStore.getReport(run.id)
+  assert.equal(report?.observations[0]?.['safe_error'], 'connection_or_tls_error')
+  assert.equal(report?.observations[0]?.['attempts_sent'], 3)
+  assert.equal(report?.summary['retries'], 2)
+  assert.equal(report?.summary['completed_requests'], 1)
+  assert.equal(report?.summary['successful_requests'], 0)
+  assert.deepEqual(report?.summary['error_summary'], [{
+    code: 'connection_or_tls_error',
+    message: 'The worker could not connect to the target or establish trusted TLS.',
+    http_status: null,
+    retryable: true,
+    count: 1,
+    attempts: 3,
+  }])
+  const events = await services.runStore.listEvents(run.id, '0')
+  const progress = events.filter((event) => event.eventType === 'progress').at(-1)?.payload
+  assert.equal(progress?.['errors'], 1)
+  assert.equal(progress?.['retries'], 2)
   await services.close()
 })
 
 test('expired leases fence old workers and recovery skips checkpointed observations', async () => {
   const services = createMemoryServices(workerConfig)
-  const root = resolve(process.cwd(), '..', 'Legacy', 'gpt56_vnext', 'baselines')
-  const seed = await importLegacyScoringRelease(resolve(root, 'runtime_catalog.json'), resolve(root, 'trusted_likelihood_v2.json'))
+  const seed = await importScoringRelease(defaultScoringReleaseManifest())
   const expiresAt = new Date(Date.now() + 60_000)
   const credentialHandle = await services.credentialVault.put('recovery-test-secret', 'quote-recovery', expiresAt)
   const run: RunRecord = {

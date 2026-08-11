@@ -9,7 +9,7 @@ export interface PublicRepository {
 export class MemoryPublicRepository implements PublicRepository {
   constructor(
     private readonly providers: PublicProvider[] = [],
-    private readonly releaseId = 'stage-c-trusted-likelihood-v2',
+    private readonly releaseId = 'stage-c-trusted-fingerprint-v3',
     private readonly registry: PublicRegistryItem[] = [],
   ) {}
 

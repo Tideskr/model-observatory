@@ -596,6 +596,300 @@
   font-size: var(--text-body);
 }
 
+/* Private run progress and report */
+
+.private-run-panel {
+  overflow: hidden;
+  background: var(--canvas);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-button);
+}
+
+.run-progress,
+.run-report {
+  padding: var(--sp-5);
+}
+
+.run-progress-head,
+.run-report-head,
+.run-report-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+
+.run-progress-head h2,
+.run-report-head h2 {
+  font-size: var(--text-body-xl);
+  line-height: var(--leading-snug);
+}
+
+.run-progress-head p,
+.run-report-head p {
+  margin-top: var(--sp-1);
+  color: var(--ink-faint);
+  font-size: var(--text-micro);
+}
+
+.run-progress-head > strong {
+  color: var(--ink);
+  font-size: var(--text-subheading);
+  font-variant-numeric: tabular-nums;
+}
+
+.run-progress > progress {
+  display: block;
+  width: 100%;
+  height: 8px;
+  margin: var(--sp-4) 0;
+  overflow: hidden;
+  accent-color: var(--accent);
+  border: 0;
+  border-radius: var(--r-input);
+}
+
+.run-progress > progress::-webkit-progress-bar {
+  background: var(--paper-strong);
+}
+
+.run-progress > progress::-webkit-progress-value {
+  background: var(--accent);
+}
+
+.run-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--r-input);
+}
+
+.run-metrics > div {
+  min-width: 0;
+  padding: var(--sp-3);
+  background: var(--canvas);
+}
+
+.run-metrics span,
+.report-metadata dt,
+.evidence-grid dt {
+  display: block;
+  color: var(--ink-faint);
+  font-size: var(--text-caption);
+}
+
+.run-metrics b {
+  display: block;
+  margin-top: var(--sp-1);
+  font-size: var(--text-body-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+.run-report {
+  border-top: 1px solid var(--line-strong);
+}
+
+.run-report-title-row {
+  justify-content: flex-start;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.report-metadata,
+.evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 var(--sp-6);
+  margin-top: var(--sp-5);
+  border-top: 1px solid var(--line);
+}
+
+.report-metadata > div,
+.evidence-grid > div {
+  min-width: 0;
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.evidence-grid > .is-full {
+  grid-column: 1 / -1;
+}
+
+.report-error {
+  padding: var(--sp-4);
+  background: var(--status-bad-tint);
+  border: 1px solid var(--status-bad-line);
+  border-radius: var(--r-input);
+}
+
+.report-error .evidence-grid {
+  margin-top: 0;
+  border-top: 0;
+}
+
+.run-failure dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2) var(--sp-5);
+  margin-top: var(--sp-3);
+}
+
+.run-failure dt {
+  color: var(--ink-faint);
+  font-size: var(--text-caption);
+}
+
+.run-failure dd {
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+  color: var(--ink-2);
+  font-size: var(--text-micro);
+}
+
+.report-metadata dd,
+.evidence-grid dd {
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+  color: var(--ink-2);
+  font-size: var(--text-body);
+}
+
+.report-section {
+  margin-top: var(--sp-7);
+}
+
+.report-section > h3 {
+  margin-bottom: var(--sp-3);
+  color: var(--ink-2);
+  font-size: var(--text-body-lg);
+}
+
+.report-section > h3 > span {
+  color: var(--ink-faint);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-regular);
+}
+
+.report-table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  font-size: var(--text-micro);
+}
+
+.report-table th,
+.report-table td {
+  padding: 9px var(--sp-3);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+
+.report-table thead th {
+  color: var(--ink-faint);
+  background: var(--paper);
+  font-size: var(--text-caption);
+  font-weight: var(--weight-medium);
+}
+
+.report-table tbody th {
+  color: var(--ink-2);
+  font-weight: var(--weight-medium);
+}
+
+.report-table tbody td {
+  color: var(--ink-muted);
+}
+
+.observations-table {
+  min-width: 920px;
+}
+
+.probability-list {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.probability-list > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(140px, 2fr) 60px;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--text-body);
+}
+
+.probability-list progress {
+  width: 100%;
+  height: 7px;
+  accent-color: var(--accent);
+}
+
+.probability-list b {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.report-limitations {
+  display: grid;
+  gap: var(--sp-2);
+  padding-left: var(--sp-5);
+  color: var(--ink-muted);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  list-style: disc;
+}
+
+.raw-report {
+  margin-top: var(--sp-7);
+  border-top: 1px solid var(--line);
+}
+
+.raw-report > summary {
+  padding: var(--sp-3) 0;
+  color: var(--ink-muted);
+  cursor: pointer;
+  font-size: var(--text-micro);
+}
+
+.raw-report pre {
+  max-height: 480px;
+  overflow: auto;
+  padding: var(--sp-4);
+  color: var(--ink-3);
+  background: var(--paper);
+  font-size: var(--text-caption);
+  line-height: var(--leading-body);
+  border: 1px solid var(--line);
+  border-radius: var(--r-input);
+}
+
+@media (max-width: 680px) {
+  .run-progress,
+  .run-report {
+    padding: var(--sp-4);
+  }
+
+  .run-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .report-metadata,
+  .evidence-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .run-failure dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .probability-list > div {
+    grid-template-columns: minmax(96px, 1fr) minmax(100px, 2fr) 54px;
+  }
+}
+
 .detected-row > :not(.t-label) {
   min-width: 0;
 }

@@ -6,15 +6,14 @@ from pathlib import Path
 import secrets
 from typing import Any
 
+from .release import release_file
 
-ROOT = Path(__file__).resolve().parents[2]
-PACKAGED_CATALOG = Path(__file__).with_name("baselines") / "runtime_catalog.json"
-DEVELOPMENT_CATALOG = ROOT / "work" / "release_assets" / "gpt56_vnext" / "runtime_catalog_internal.json"
+PACKAGED_CATALOG = release_file("runtime_catalog")
 
 
 def load_catalog() -> dict[str, Any]:
     override = os.environ.get("GPT56_RUNTIME_CATALOG")
-    path = Path(override) if override else PACKAGED_CATALOG if PACKAGED_CATALOG.is_file() else DEVELOPMENT_CATALOG
+    path = Path(override) if override else PACKAGED_CATALOG
     if not path.is_file():
         raise FileNotFoundError("GPT-5.6 runtime catalog is missing; rebuild release assets before running")
     value = json.loads(path.read_text(encoding="utf-8"))

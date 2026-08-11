@@ -6,18 +6,18 @@ from decimal import Decimal, InvalidOperation
 import re
 from typing import Any, Iterable
 
+from .release import load_release_manifest
 
-TARGET_MODELS = ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
-LEGACY_MODELS = ("gpt-5.5", "gpt-5.4", "gpt-5.4-mini")
+_RELEASE = load_release_manifest()
+TARGET_MODELS = tuple(_RELEASE["models"]["target"])
+LEGACY_MODELS = tuple(_RELEASE["models"]["legacy"])
 ALL_MODELS = (*TARGET_MODELS, *LEGACY_MODELS)
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
+SIGNATURES: dict[str, dict[str, dict[str, str]]] = _RELEASE["signatures"]
 EXACT_SIGNATURES: dict[str, dict[str, str]] = {
-    "gpt-5.6-terra": {"low": "12", "medium": "16", "high": "32", "xhigh": "84", "max": "960"},
-    "gpt-5.6-luna": {"low": "8", "medium": "16", "high": "48", "xhigh": "128", "max": "768"},
-    "gpt-5.5": {"low": "12", "medium": "24", "high": "96", "xhigh": "768"},
-    "gpt-5.4": {"low": "12", "medium": "20", "high": "96", "xhigh": "512"},
-    "gpt-5.4-mini": {"low": "8", "medium": "24", "high": "64", "xhigh": "768"},
+    model: {effort: str(value["value"]) for effort, value in efforts.items() if value["match_rule"] == "exact"}
+    for model, efforts in SIGNATURES.items()
 }
 
 REFUSAL_MARKERS = (
@@ -60,9 +60,13 @@ def _sol_matches(effort: str, value: str) -> bool:
 
 
 def _model_matches(model: str, effort: str, value: str) -> bool:
-    if model == "gpt-5.6-sol":
-        return _sol_matches(effort, value)
-    return EXACT_SIGNATURES.get(model, {}).get(effort) == value
+    signature = SIGNATURES.get(model, {}).get(effort)
+    if signature is None:
+        return False
+    expected = str(signature["value"])
+    if signature["match_rule"] == "exact_or_decimal_or_long_prefix":
+        return bool(value == expected or re.fullmatch(re.escape(expected) + r"(?:\.\d+|\d{2,})", value))
+    return value == expected
 
 
 def compatible_models(effort: str, normalized_value: str | None) -> frozenset[str]:

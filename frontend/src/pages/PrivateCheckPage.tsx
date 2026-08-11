@@ -11,6 +11,7 @@ import {
   type PrivateRunReport,
   type PrivateRunStatus,
   type PreparedPrivateRunSubmission,
+  PrivateRunApiError,
 } from '../api/privateRuns'
 import { detectLocalRunner, supportsNativeFormat } from '../lib/localRunner'
 import type { RunnerState } from '../lib/localRunner'
@@ -20,6 +21,8 @@ import { DEFAULT_MULTIPLIER, DEFAULT_PRICE, estimateMaximumRunCost } from '../pr
 import type { PriceAssumption } from '../pricing'
 import { ProbeSelector } from '../components/ProbeSelector'
 import { RunEstimate } from '../components/RunEstimate'
+import { PrivateRunResult, RunProgress } from '../components/PrivateRunResult'
+import type { PrivateRunProgress } from '../components/PrivateRunResult'
 import { PageHeader, Pill } from '../components/ui'
 import { CheckField } from '../components/Fields'
 import {
@@ -31,12 +34,25 @@ import {
   DialogTitle,
 } from '../components/ui-kit/dialog'
 
-interface ActiveRun {
+interface ActiveRun extends PrivateRunProgress {
   handle: PrivateRunHandle
-  status: PrivateRunStatus
-  completed: number
-  total: number
   report: PrivateRunReport | null
+}
+
+interface RunFailure {
+  stage: string
+  code: string
+  status: number | null
+  message: string
+  requestId: string | null
+}
+
+function eventNumber(payload: Record<string, unknown>, keys: string[], fallback: number): number {
+  for (const key of keys) {
+    const value = payload[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+  }
+  return fallback
 }
 
 export function PrivateCheckPage() {
@@ -52,6 +68,7 @@ export function PrivateCheckPage() {
   const [remoteConsent, setRemoteConsent] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)
+  const [runFailure, setRunFailure] = useState<RunFailure | null>(null)
   const runController = useRef<AbortController | null>(null)
   const pendingSubmission = useRef<{
     fingerprint: string
@@ -116,6 +133,8 @@ export function PrivateCheckPage() {
     runController.current?.abort()
     runController.current = controller
     setSubmitting(true)
+    setRunFailure(null)
+    let failureStage = '报价或建单'
     try {
       const handle = await createPrivateRun({
         apiOrigin,
@@ -135,24 +154,62 @@ export function PrivateCheckPage() {
       })
       pendingSubmission.current = null
       setApiKey('')
-      setActiveRun({ handle, status: handle.status, completed: 0, total: estimate.requests, report: null })
+      failureStage = '事件或报告读取'
+      setActiveRun({
+        handle,
+        status: handle.status,
+        phase: 'queued',
+        completed: 0,
+        total: estimate.requests,
+        successful: 0,
+        errors: 0,
+        cancelled: 0,
+        pending: estimate.requests,
+        inFlight: 0,
+        httpAttempts: 0,
+        retries: 0,
+        report: null,
+      })
       const report = await waitForPrivateRun(handle, (event) => {
         setActiveRun((current) => {
           if (!current || current.handle.runId !== handle.runId) return current
           const status = typeof event.payload['status'] === 'string'
             ? event.payload['status'] as PrivateRunStatus
             : current.status
-          const completed = typeof event.payload['completed'] === 'number' ? event.payload['completed'] : current.completed
-          const total = typeof event.payload['total'] === 'number' ? event.payload['total'] : current.total
-          return { ...current, status, completed, total }
+          const completed = eventNumber(event.payload, ['completed', 'completed_requests'], current.completed)
+          const total = eventNumber(event.payload, ['total', 'total_requests'], current.total)
+          const errors = eventNumber(event.payload, ['errors', 'failed', 'failed_requests'], current.errors)
+          const successful = eventNumber(event.payload, ['successful', 'successful_requests'], Math.max(current.successful, completed - errors))
+          return {
+            ...current,
+            status,
+            phase: typeof event.payload['phase'] === 'string' ? event.payload['phase'] : event.type,
+            completed,
+            total,
+            successful,
+            errors,
+            cancelled: eventNumber(event.payload, ['cancelled', 'cancelled_requests'], current.cancelled),
+            pending: eventNumber(event.payload, ['pending'], Math.max(0, total - completed)),
+            inFlight: eventNumber(event.payload, ['in_flight', 'inFlight'], current.inFlight),
+            httpAttempts: eventNumber(event.payload, ['http_attempts', 'attempts'], Math.max(current.httpAttempts, completed)),
+            retries: eventNumber(event.payload, ['retries'], current.retries),
+          }
         })
       }, controller.signal)
       setActiveRun((current) => current?.handle.runId === handle.runId
-        ? { ...current, status: report.status, completed: current.total, report }
+        ? { ...current, status: report.status, phase: 'finished', completed: current.total, pending: 0, inFlight: 0, report }
         : current)
-      toast.success('检测完成')
+      if (report.status === 'failed') toast.error('检测失败，报告中已列出详细原因')
+      else if (report.status === 'incomplete') toast.warning('检测部分完成，请检查失败观测')
+      else toast.success('检测完成')
     } catch (error) {
-      if (!controller.signal.aborted) toast.error(error instanceof Error ? error.message : '检测启动失败')
+      if (!controller.signal.aborted) {
+        const failure = error instanceof PrivateRunApiError
+          ? { stage: failureStage, code: error.code, status: error.status, message: error.message, requestId: error.requestId }
+          : { stage: failureStage, code: 'client_request_failed', status: null, message: error instanceof Error ? error.message : '检测启动失败', requestId: null }
+        setRunFailure(failure)
+        toast.error(failure.message)
+      }
     } finally {
       if (runController.current === controller) runController.current = null
       setSubmitting(false)
@@ -304,26 +361,24 @@ export function PrivateCheckPage() {
           </div>
 
           {activeRun && (
-            <section className="card card-pad" aria-live="polite">
-              <div className="card-head">
-                <div className="card-head-text">
-                  <h2>私有报告</h2>
-                  <p><code>{activeRun.handle.runId}</code></p>
-                </div>
-                <Pill tone={activeRun.report?.status === 'completed' ? 'good' : activeRun.report ? 'warn' : 'info'} size="sm">
-                  {activeRun.status}
-                </Pill>
+            <section className="private-run-panel">
+              <RunProgress runId={activeRun.handle.runId} progress={activeRun} />
+              {activeRun.report && <PrivateRunResult report={activeRun.report} />}
+            </section>
+          )}
+
+          {runFailure && (
+            <section className="notice notice-bad run-failure" role="alert">
+              <div className="notice-body">
+                <strong>检测请求失败</strong>
+                <p>{runFailure.message}</p>
+                <dl>
+                  <div><dt>阶段</dt><dd>{runFailure.stage}</dd></div>
+                  <div><dt>错误码</dt><dd><code>{runFailure.code}</code></dd></div>
+                  <div><dt>HTTP 状态</dt><dd>{runFailure.status ?? '—'}</dd></div>
+                  <div><dt>Request ID</dt><dd><code>{runFailure.requestId ?? '—'}</code></dd></div>
+                </dl>
               </div>
-              <ul className="estimate-list">
-                <li><span>进度</span><b>{activeRun.completed} / {activeRun.total}</b></li>
-                {activeRun.report && (
-                  <>
-                    <li><span>结论</span><b>{String(activeRun.report.summary['overall_verdict'] ?? '无可用结论')}</b></li>
-                    <li><span>评分版本</span><b>{activeRun.report.scoring_release_id}</b></li>
-                    <li><span>脱敏观测</span><b>{activeRun.report.observations.length}</b></li>
-                  </>
-                )}
-              </ul>
             </section>
           )}
         </div>

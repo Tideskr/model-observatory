@@ -1,0 +1,38 @@
+name: Release runner
+
+on:
+  push:
+    tags:
+      - runner-v*
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Test runner
+        env:
+          PYTHONPATH: local-runner/src
+        run: python -m unittest discover -s local-runner/tests -v
+
+      - name: Build release assets
+        run: |
+          python -m pip install --disable-pip-version-check build
+          python local-runner/tools/build_release.py --output dist/runner
+
+      - name: Verify tag and package version
+        run: test "runner-v$(cat local-runner/VERSION)" = "$GITHUB_REF_NAME"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/runner/* --title "Model Observatory Runner $(cat local-runner/VERSION)" --notes-file local-runner/RELEASE_NOTES_4.2.0.md

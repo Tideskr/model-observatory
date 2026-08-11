@@ -1,15 +1,13 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { resolve } from 'node:path'
 import { test } from 'node:test'
 import { buildRunJobs } from '../src/executor/job-plan.js'
-import { importLegacyScoringRelease } from '../src/scoring/legacy-import.js'
+import { defaultScoringReleaseManifest, importScoringRelease } from '../src/scoring/release-import.js'
 import { scoreRun, type RawObservation } from '../src/scoring/score.js'
 import type { RunRecord } from '../src/store/run-store.js'
 
-test('medium preset uses the exact Legacy calibration and produces a formal probability result', async () => {
-  const root = resolve(process.cwd(), '..', 'Legacy', 'gpt56_vnext', 'baselines')
-  const seed = await importLegacyScoringRelease(resolve(root, 'runtime_catalog.json'), resolve(root, 'trusted_likelihood_v2.json'))
+test('medium preset uses the exact v3 runtime contract and produces a formal fingerprint result', async () => {
+  const seed = await importScoringRelease(defaultScoringReleaseManifest())
   const run: RunRecord = {
     id: randomUUID(), quoteId: randomUUID(), requestDigest: 'd'.repeat(64), status: 'running',
     targetOrigin: 'https://api.example.com', targetBaseUrl: 'https://api.example.com/v1', targetHostname: 'api.example.com',
@@ -58,5 +56,5 @@ test('medium preset uses the exact Legacy calibration and produces a formal prob
   assert.equal(probability['formal_eligible'], true)
   assert.equal(probability['winner'], 'gpt-5.6-sol')
   assert.equal(probability['probability_pass'], true)
-  assert.equal(result.summary['overall_verdict'], '通过')
+  assert.equal(result.summary['overall_verdict'], 'Juice通过；指纹强烈指向 Sol')
 })
