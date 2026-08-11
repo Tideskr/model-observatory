@@ -22,7 +22,8 @@ export interface BuildAppOptions {
 }
 
 function sendFrontendIndex(reply: FastifyReply) {
-  return reply.sendFile('index.html', { maxAge: 0, immutable: false })
+  void reply.header('cache-control', 'no-store')
+  return reply.sendFile('index.html', { cacheControl: false })
 }
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
@@ -110,10 +111,14 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     await app.register(fastifyStatic, {
       root: config.frontendDistDir,
       wildcard: false,
-      maxAge: '30d',
-      immutable: true,
+      cacheControl: false,
+      setHeaders(reply, path) {
+        void reply.header(
+          'cache-control',
+          path.endsWith('index.html') ? 'no-store' : 'public, max-age=2592000, immutable',
+        )
+      },
     })
-    app.get('/', async (_request, reply) => sendFrontendIndex(reply))
     app.get('/*', async (request, reply) => {
       if (request.url.startsWith('/api/')) return reply.callNotFound()
       return sendFrontendIndex(reply)
