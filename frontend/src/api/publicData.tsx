@@ -1,6 +1,5 @@
 /* oxlint-disable react/only-export-components */
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
-import { providers as mockProviders } from '../data'
 import type { Provider } from '../data'
 import type { ProbeDefinition } from '../probes'
 import { apiUrl } from '../config'
@@ -29,13 +28,14 @@ interface RegistryResponse extends ApiMeta {
   items: RegistryItem[]
 }
 
-type DataMode = 'loading' | 'live' | 'mock'
+type DataMode = 'loading' | 'live' | 'error'
 
 interface PublicDataState {
   providers: Provider[]
   mode: DataMode
   dataVersion: string
   methodVersion: string
+  error: string | null
 }
 
 const PublicDataContext = createContext<PublicDataState | null>(null)
@@ -47,29 +47,27 @@ async function requestJson<T>(path: string, signal: AbortSignal): Promise<T> {
 
 export function PublicDataProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<PublicDataState>({
-    providers: mockProviders,
+    providers: [],
     mode: 'loading',
-    dataVersion: 'demo-2026.08',
-    methodVersion: 'prototype',
+    dataVersion: '',
+    methodVersion: '',
+    error: null,
   })
 
   useEffect(() => {
     const controller = new AbortController()
     requestJson<DashboardResponse>('/api/v1/dashboard', controller.signal)
       .then((response) => {
-        if (!response.providers.length) {
-          setState((current) => ({ ...current, mode: 'mock' }))
-          return
-        }
         setState({
           providers: response.providers,
           mode: 'live',
           dataVersion: response.data_version,
           methodVersion: response.method_version,
+          error: null,
         })
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setState((current) => ({ ...current, mode: 'mock' }))
+      .catch((error) => {
+        if (!controller.signal.aborted) setState((current) => ({ ...current, providers: [], mode: 'error', error: error instanceof Error ? error.message : '公开数据加载失败' }))
       })
     return () => controller.abort()
   }, [])

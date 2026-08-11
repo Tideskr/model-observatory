@@ -22,6 +22,8 @@ export interface TransportResult {
   elapsedMs: number
   statusCode: number
   eventCount: number
+  inputTokens?: number
+  outputTokens?: number
 }
 
 export class TransportError extends Error {
@@ -76,6 +78,8 @@ function upstreamProblem(raw: string, statusCode: number): string | undefined {
     const code = typeof error['code'] === 'string' ? error['code'].slice(0, 128) : ''
     const message = typeof error['message'] === 'string'
       ? Array.from(error['message'].slice(0, 500), (character) => character.charCodeAt(0) < 32 ? ' ' : character).join('')
+        .replace(/\b(sk|sess|key)-[A-Za-z0-9_-]{12,}\b/gi, '$1-[REDACTED]')
+        .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, 'Bearer [REDACTED]')
       : ''
     if (code || message) return `Upstream HTTP ${statusCode}${code ? ` (${code})` : ''}: ${message || 'request rejected'}`
   } catch { /* Non-JSON error bodies are intentionally not reflected. */ }
@@ -98,6 +102,15 @@ function outputText(response: Record<string, unknown>): string {
     }
   }
   return chunks.join('').trim()
+}
+
+function usage(response: Record<string, unknown>): { inputTokens?: number; outputTokens?: number } {
+  const value = response['usage']
+  if (!value || typeof value !== 'object') return {}
+  const record = value as Record<string, unknown>
+  const inputTokens = typeof record['input_tokens'] === 'number' && record['input_tokens'] >= 0 ? record['input_tokens'] : undefined
+  const outputTokens = typeof record['output_tokens'] === 'number' && record['output_tokens'] >= 0 ? record['output_tokens'] : undefined
+  return { ...(inputTokens == null ? {} : { inputTokens }), ...(outputTokens == null ? {} : { outputTokens }) }
 }
 
 export function parseSseResponse(raw: string): { response: Record<string, unknown>; eventCount: number } {
@@ -205,12 +218,12 @@ export async function sendNormalRequest(input: TransportRequest): Promise<Transp
             const contentType = String(response.headers['content-type'] ?? '')
             if (contentType.includes('text/event-stream') || raw.trimStart().startsWith('data:')) {
               const parsed = parseSseResponse(raw)
-              resolve({ answer: outputText(parsed.response), elapsedMs: Date.now() - started, statusCode, eventCount: parsed.eventCount })
+              resolve({ answer: outputText(parsed.response), elapsedMs: Date.now() - started, statusCode, eventCount: parsed.eventCount, ...usage(parsed.response) })
             } else {
               const parsed = JSON.parse(raw) as Record<string, unknown>
               if (parsed['status'] === 'failed') throw new TransportError('upstream_response_failed', true, statusCode)
               if (parsed['status'] === 'incomplete') throw new TransportError('upstream_response_incomplete', true, statusCode)
-              resolve({ answer: outputText(parsed), elapsedMs: Date.now() - started, statusCode, eventCount: 0 })
+              resolve({ answer: outputText(parsed), elapsedMs: Date.now() - started, statusCode, eventCount: 0, ...usage(parsed) })
             }
           } catch (error) {
             reject(error instanceof TransportError ? error : new TransportError('invalid_upstream_response', true, statusCode))

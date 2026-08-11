@@ -13,6 +13,7 @@ x-app-environment: &app-environment
   REPOSITORY_URL: https://github.com/Tideskr/model-observatory
   TRUST_PROXY: "1"
   FRONTEND_DIST_DIR: /app/public
+  PROVIDER_REGISTRY_PATH: /app/registry/providers.json
   TOKEN_PEPPER: ${TOKEN_PEPPER}
   QUOTE_SIGNING_SECRET: ${QUOTE_SIGNING_SECRET}
   CREDENTIAL_MASTER_KEY: ${CREDENTIAL_MASTER_KEY}
@@ -45,7 +46,7 @@ services:
     build:
       context: .
     restart: "no"
-    command: ["sh", "-c", "node dist/db/migrate-cli.js && node dist/scoring/import-cli.js"]
+    command: ["sh", "-c", "node dist/db/migrate-cli.js && node dist/scoring/import-cli.js && node dist/registry/sync-cli.js"]
 
   api:
     <<: *app-service

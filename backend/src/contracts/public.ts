@@ -10,7 +10,12 @@ const SourceSamplesSchema = Type.Object(
   { additionalProperties: false },
 )
 const ModelEntrySchema = Type.Object(
-  { model: Type.String(), bySource: SourceNumbersSchema, samples: SourceSamplesSchema },
+  {
+    model: Type.String(), bySource: SourceNumbersSchema, samples: SourceSamplesSchema,
+    availabilityBySource: SourceNumbersSchema, attemptedSamples: SourceSamplesSchema,
+    inconclusiveSamples: SourceSamplesSchema,
+    attribution: Type.Object({ verified: Type.Integer(), donor_declared: Type.Integer() }, { additionalProperties: false }),
+  },
   { additionalProperties: false },
 )
 const ProviderGroupSchema = Type.Object(
@@ -35,7 +40,8 @@ export const ProviderSchema = Type.Object(
   {
     slug: Type.String(), name: Type.String(),
     kind: Type.Union([Type.Literal('relay'), Type.Literal('official'), Type.Literal('official_proxy')]),
-    endpoint: Type.String(), lastCheckedAt: Type.String({ format: 'date-time' }), history: Type.Array(Type.Integer()),
+    endpoint: Type.String(), domains: Type.Array(Type.String()),
+    lastCheckedAt: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]), history: Type.Array(Type.Integer()),
     groups: Type.Array(ProviderGroupSchema), anomalies: Type.Array(AnomalySchema),
   },
   { additionalProperties: false },

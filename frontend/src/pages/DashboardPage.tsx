@@ -1,4 +1,4 @@
-import { ChevronRight, ShieldAlert } from 'lucide-react'
+import { ChevronRight, Database, ShieldAlert, TriangleAlert } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { providerKindLabel } from '../data'
@@ -10,6 +10,7 @@ import { SelectField } from '../components/Fields'
 import {
   ConfidenceFigure,
   GroupBreakdown,
+  EmptyState,
   PageHeader,
   Sparkline,
   WeakestLinkWarning,
@@ -24,7 +25,7 @@ const sortOptions = [
 
 function ProviderBlock({ provider }: { provider: Provider }) {
   const headline = providerHeadline(provider)
-  const checked = useRelativeTime(new Date(provider.lastCheckedAt))
+  const checked = useRelativeTime(new Date(provider.lastCheckedAt ?? 0))
 
   return (
     <li className="provider-block">
@@ -42,7 +43,7 @@ function ProviderBlock({ provider }: { provider: Provider }) {
             tone={meterTone(headline)}
             label={`${provider.name} 综合置信率`}
           />
-          <span className="provider-checked">{checked}</span>
+          <span className="provider-checked">{provider.lastCheckedAt ? checked : '尚未检测'}</span>
         </span>
 
         <ChevronRight className="provider-chevron" size={18} aria-hidden="true" />
@@ -56,7 +57,7 @@ function ProviderBlock({ provider }: { provider: Provider }) {
 
 export function DashboardPage() {
   const [sort, setSort] = useState('risk')
-  const { providers } = usePublicData()
+  const { providers, mode, error } = usePublicData()
 
   const visible = useMemo(() => {
     const rows = [...providers]
@@ -99,11 +100,17 @@ export function DashboardPage() {
         </section>
       )}
 
-      <ol className="provider-list">
-        {visible.map((provider) => (
-          <ProviderBlock key={provider.slug} provider={provider} />
-        ))}
-      </ol>
+      {mode === 'error' ? (
+        <EmptyState icon={<TriangleAlert size={22} />} title="公开数据加载失败">{error}</EmptyState>
+      ) : visible.length === 0 ? (
+        <EmptyState icon={<Database size={22} />} title={mode === 'loading' ? '正在加载观测数据' : '暂无有效检测数据'}>
+          已登记供应商会在收到并完成第一轮真实捐赠检测后显示分组结果。
+        </EmptyState>
+      ) : (
+        <ol className="provider-list">
+          {visible.map((provider) => <ProviderBlock key={provider.slug} provider={provider} />)}
+        </ol>
+      )}
 
       <p className="page-foot-note">
         置信率只反映所列账号、节点与时间窗口内的观测结果，不构成对模型身份的保证。

@@ -14,6 +14,8 @@ import { privateRunRoutes } from './routes/private-runs.js'
 import { publicRoutes } from './routes/public.js'
 import { contributionRoutes } from './routes/contributions.js'
 import { createServices, type AppServices } from './services.js'
+import { loadProviderRegistry } from './registry/catalog.js'
+import { resolve } from 'node:path'
 
 export interface BuildAppOptions {
   config?: AppConfig
@@ -28,7 +30,10 @@ function sendFrontendIndex(reply: FastifyReply) {
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
   const config = options.config ?? loadConfig()
-  const services = options.services ?? createServices(config)
+  const services = options.services ?? createServices(
+    config,
+    await loadProviderRegistry(resolve(process.cwd(), config.providerRegistryPath)),
+  )
   const app = Fastify({
     logger:
       options.logger === false

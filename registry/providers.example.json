@@ -1,0 +1,34 @@
+{
+  "schema_version": 2,
+  "pricing": {
+    "input_per_million_usd": 1.25,
+    "output_per_million_usd": 10
+  },
+  "providers": [
+    {
+      "slug": "example-relay",
+      "name": "示例中转",
+      "kind": "relay",
+      "group_detection": {
+        "probe_model": "__api_authenticator_group_probe__"
+      },
+      "groups": [
+        {
+          "id": "standard",
+          "name": "标准分组",
+          "aliases": ["默认分组"],
+          "multiplier": 0.2,
+          "models": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]
+        }
+      ],
+      "domains": [
+        {
+          "hostname": "api.example.com",
+          "role": "primary",
+          "default_base_path": "/v1",
+          "status": "active"
+        }
+      ]
+    }
+  ]
+}

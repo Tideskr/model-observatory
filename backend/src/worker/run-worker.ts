@@ -225,7 +225,12 @@ export class RunWorker {
           cacheKey: job.cacheKey,
           signal: controller.signal,
         })
-        return { job, status: 'ok', answer: result.answer, elapsedMs: result.elapsedMs, attempts: attempt + 1, statusCode: result.statusCode }
+        return {
+          job, status: 'ok', answer: result.answer, elapsedMs: result.elapsedMs, attempts: attempt + 1,
+          statusCode: result.statusCode,
+          ...(result.inputTokens == null ? {} : { inputTokens: result.inputTokens }),
+          ...(result.outputTokens == null ? {} : { outputTokens: result.outputTokens }),
+        }
       } catch (error) {
         if (controller.signal.aborted) throw new LeaseLostError()
         if (error instanceof AppError) {

@@ -11,6 +11,7 @@ const provider: PublicProvider = {
   name: 'Example Relay',
   kind: 'relay',
   endpoint: 'https://api.example.test',
+  domains: ['api.example.test'],
   lastCheckedAt: '2026-08-10T12:00:00.000Z',
   history: [82, 84, 86],
   groups: [
@@ -23,6 +24,10 @@ const provider: PublicProvider = {
           model: 'gpt-5.6-sol',
           bySource: { vendor: 98, donated: 84, community: 88 },
           samples: { vendor: 3, donated: 12, community: 20 },
+          availabilityBySource: { vendor: 100, donated: 96, community: 98 },
+          attemptedSamples: { vendor: 3, donated: 768, community: 1280 },
+          inconclusiveSamples: { vendor: 0, donated: 1, community: 2 },
+          attribution: { verified: 10, donor_declared: 3 },
         },
       ],
     },

@@ -23,6 +23,7 @@ export interface AppConfig {
   repositoryUrl: string
   trustProxy: false | string | string[] | number
   frontendDistDir: string | null
+  providerRegistryPath: string
 }
 
 function parseEnvironment(value: string | undefined): AppEnvironment {
@@ -127,5 +128,6 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     repositoryUrl: repositoryUrl(environment['REPOSITORY_URL']),
     trustProxy: trustProxy(environment['TRUST_PROXY']),
     frontendDistDir: frontendDistDir(environment['FRONTEND_DIST_DIR']),
+    providerRegistryPath: environment['PROVIDER_REGISTRY_PATH'] ?? '../registry/providers.json',
   }
 }

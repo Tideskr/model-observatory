@@ -1,10 +1,18 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "pricing": {
+    "input_per_million_usd": 1.25,
+    "output_per_million_usd": 10
+  },
   "providers": [
     {
       "slug": "congee-pro",
       "name": "粥 Pro",
       "kind": "relay",
+      "group_detection": {
+        "probe_model": "__api_authenticator_group_probe__"
+      },
+      "groups": [],
       "domains": [
         {
           "hostname": "congee.pro",
@@ -18,6 +26,10 @@
       "slug": "shuai-api",
       "name": "帅 API",
       "kind": "relay",
+      "group_detection": {
+        "probe_model": "__api_authenticator_group_probe__"
+      },
+      "groups": [],
       "domains": [
         {
           "hostname": "api.shuaiapi.com",
@@ -49,6 +61,10 @@
       "slug": "ai-hub",
       "name": "AI Hub",
       "kind": "relay",
+      "group_detection": {
+        "probe_model": "__api_authenticator_group_probe__"
+      },
+      "groups": [],
       "domains": [
         {
           "hostname": "aihub.dog",
@@ -74,6 +90,10 @@
       "slug": "xingchen",
       "name": "君の星辰",
       "kind": "relay",
+      "group_detection": {
+        "probe_model": "__api_authenticator_group_probe__"
+      },
+      "groups": [],
       "domains": [
         {
           "hostname": "ai.centos.hk",
@@ -99,6 +119,10 @@
       "slug": "true-sota",
       "name": "True SOTA",
       "kind": "relay",
+      "group_detection": {
+        "probe_model": "__api_authenticator_group_probe__"
+      },
+      "groups": [],
       "domains": [
         {
           "hostname": "true-sota.com",
@@ -112,6 +136,10 @@
       "slug": "gate-ai",
       "name": "Gate AI",
       "kind": "relay",
+      "group_detection": {
+        "probe_model": "__api_authenticator_group_probe__"
+      },
+      "groups": [],
       "domains": [
         {
           "hostname": "gateai.cc",
@@ -125,6 +153,10 @@
       "slug": "4-router",
       "name": "4 Router",
       "kind": "relay",
+      "group_detection": {
+        "probe_model": "__api_authenticator_group_probe__"
+      },
+      "groups": [],
       "domains": [
         {
           "hostname": "4router.net",

@@ -9,15 +9,17 @@ export class PostgresPublicRepository implements PublicRepository {
   ) {}
 
   async listProviders(): Promise<PublicProvider[]> {
-    const providers = await this.pool.query<{ slug: string; name: string; kind: PublicProvider['kind']; endpoint_hostname: string; last_checked_at: Date }>(
-      'SELECT slug,name,kind,endpoint_hostname,last_checked_at FROM providers ORDER BY name',
+    const providers = await this.pool.query<{ slug: string; name: string; kind: PublicProvider['kind']; endpoint_hostname: string; last_checked_at: Date | null }>(
+      `SELECT p.slug,p.name,p.kind,p.endpoint_hostname,p.last_checked_at FROM providers p
+       WHERE p.active=true AND EXISTS (SELECT 1 FROM provider_groups g WHERE g.provider_slug=p.slug AND g.active=true)
+       ORDER BY p.name`,
     )
     return Promise.all(providers.rows.map((row) => this.#hydrateProvider(row)))
   }
 
   async getProvider(slug: string): Promise<PublicProvider | null> {
-    const result = await this.pool.query<{ slug: string; name: string; kind: PublicProvider['kind']; endpoint_hostname: string; last_checked_at: Date }>(
-      'SELECT slug,name,kind,endpoint_hostname,last_checked_at FROM providers WHERE slug=$1', [slug],
+    const result = await this.pool.query<{ slug: string; name: string; kind: PublicProvider['kind']; endpoint_hostname: string; last_checked_at: Date | null }>(
+      'SELECT slug,name,kind,endpoint_hostname,last_checked_at FROM providers WHERE slug=$1 AND active=true', [slug],
     )
     return result.rows[0] ? this.#hydrateProvider(result.rows[0]) : null
   }
@@ -42,17 +44,22 @@ export class PostgresPublicRepository implements PublicRepository {
     }
   }
 
-  async #hydrateProvider(row: { slug: string; name: string; kind: PublicProvider['kind']; endpoint_hostname: string; last_checked_at: Date }): Promise<PublicProvider> {
-    const [groups, models, scores, history, anomalies] = await Promise.all([
-      this.pool.query<{ group_id: string; kind: 'none' | 'price' | 'tier'; label: string; multiplier: number | null }>('SELECT group_id,kind,label,multiplier FROM provider_groups WHERE provider_slug=$1 ORDER BY group_id', [row.slug]),
-      this.pool.query<{ group_id: string; model: string }>('SELECT group_id,model FROM provider_models WHERE provider_slug=$1 ORDER BY group_id,model', [row.slug]),
-      this.pool.query<{ group_id: string; model: string; source: 'vendor' | 'donated' | 'community'; confidence: number | null; samples: number }>('SELECT group_id,model,source,confidence,samples FROM provider_source_scores WHERE provider_slug=$1', [row.slug]),
-      this.pool.query<{ confidence: number }>('SELECT confidence FROM provider_history WHERE provider_slug=$1 ORDER BY bucket_at', [row.slug]),
+  async #hydrateProvider(row: { slug: string; name: string; kind: PublicProvider['kind']; endpoint_hostname: string; last_checked_at: Date | null }): Promise<PublicProvider> {
+    const [domains, groups, models, scores, history, anomalies] = await Promise.all([
+      this.pool.query<{ hostname: string }>('SELECT hostname FROM provider_domains WHERE provider_slug=$1 ORDER BY role DESC,hostname', [row.slug]),
+      this.pool.query<{ group_id: string; kind: 'none' | 'price' | 'tier'; label: string; multiplier: number | null }>('SELECT group_id,kind,label,multiplier FROM provider_groups WHERE provider_slug=$1 AND active=true ORDER BY group_id', [row.slug]),
+      this.pool.query<{ group_id: string; model: string }>('SELECT group_id,model FROM provider_models WHERE provider_slug=$1 AND active=true ORDER BY group_id,model', [row.slug]),
+      this.pool.query<{ group_id: string; model: string; source: 'vendor' | 'donated' | 'community'; confidence: number | null; samples: number; availability: number | null; attempted_samples: number; inconclusive_samples: number; verified_samples: number; declared_samples: number }>('SELECT group_id,model,source,confidence,samples,availability,attempted_samples,inconclusive_samples,verified_samples,declared_samples FROM provider_source_scores WHERE provider_slug=$1', [row.slug]),
+      this.pool.query<{ confidence: number }>(
+        `SELECT confidence FROM (SELECT bucket_at,confidence FROM provider_history WHERE provider_slug=$1
+         ORDER BY bucket_at DESC LIMIT 30) recent ORDER BY bucket_at`, [row.slug],
+      ),
       this.pool.query<{ id: string; observed_at: Date; channel_display: string; source: 'vendor' | 'donated' | 'community'; model: string; group_id: string | null; probe_id: string; expected_display: string; observed_display: string; severity: 'hard' | 'soft' }>('SELECT id,observed_at,channel_display,source,model,group_id,probe_id,expected_display,observed_display,severity FROM public_anomalies WHERE provider_slug=$1 ORDER BY observed_at DESC', [row.slug]),
     ])
     return {
       slug: row.slug, name: row.name, kind: row.kind, endpoint: row.endpoint_hostname,
-      lastCheckedAt: row.last_checked_at.toISOString(), history: history.rows.map((item) => item.confidence),
+      domains: domains.rows.map((item) => item.hostname),
+      lastCheckedAt: row.last_checked_at?.toISOString() ?? null, history: history.rows.map((item) => item.confidence),
       groups: groups.rows.map((group) => ({
         id: group.group_id, kind: group.kind, label: group.label,
         ...(group.multiplier == null ? {} : { multiplier: group.multiplier }),
@@ -60,8 +67,17 @@ export class PostgresPublicRepository implements PublicRepository {
           const values = scores.rows.filter((score) => score.group_id === group.group_id && score.model === item.model)
           const bySource = { vendor: null, donated: null, community: null } as Record<'vendor' | 'donated' | 'community', number | null>
           const samples = { vendor: 0, donated: 0, community: 0 }
-          for (const score of values) { bySource[score.source] = score.confidence; samples[score.source] = score.samples }
-          return { model: item.model, bySource, samples }
+          const availabilityBySource = { vendor: null, donated: null, community: null } as Record<'vendor' | 'donated' | 'community', number | null>
+          const attemptedSamples = { vendor: 0, donated: 0, community: 0 }
+          const inconclusiveSamples = { vendor: 0, donated: 0, community: 0 }
+          const attribution = { verified: 0, donor_declared: 0 }
+          for (const score of values) {
+            bySource[score.source] = score.confidence; samples[score.source] = score.samples
+            availabilityBySource[score.source] = score.availability; attemptedSamples[score.source] = score.attempted_samples
+            inconclusiveSamples[score.source] = score.inconclusive_samples
+            if (score.source === 'donated') { attribution.verified = score.verified_samples; attribution.donor_declared = score.declared_samples }
+          }
+          return { model: item.model, bySource, samples, availabilityBySource, attemptedSamples, inconclusiveSamples, attribution }
         }),
       })),
       anomalies: anomalies.rows.map((item) => ({

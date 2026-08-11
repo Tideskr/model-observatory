@@ -73,7 +73,7 @@ export function ProviderPage() {
           <ConfidenceFigure value={headline} />
           <div className="verdict-meta">
             <span className="t-label">综合置信率</span>
-            <span>各模型算术均值 · 不含商家自报 · 更新于 {checked}</span>
+            <span>各模型算术均值 · 不含商家自报 · {provider.lastCheckedAt ? `更新于 ${checked}` : '尚未完成检测'}</span>
           </div>
           <Sparkline
             values={provider.history}

@@ -1,135 +1,133 @@
-import { Check, CloudCog, Eye, EyeOff, KeyRound, Mail, Network, ShieldAlert } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import { Check, CloudCog, Eye, EyeOff, KeyRound, Mail, Network, ShieldAlert, TriangleAlert } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { RadioGroup } from 'radix-ui'
 import { toast } from 'sonner'
-import { submitApiDonation, type DonationReceipt, type PreparedDonationSubmission } from '../api/contributions'
-import { providers, providerKindLabel } from '../data'
-import { presets, estimateRun } from '../probes'
-import { DEFAULT_PRICE, estimateCost, formatUsd } from '../pricing'
+import {
+  ContributionApiError, fetchDonationStatus, quoteApiDonation, submitApiDonation,
+  type DonationQuote, type DonationReceipt, type DonationStatus, type PreparedDonationSubmission,
+} from '../api/contributions'
+import { providerKindLabel } from '../data'
+import { formatUsd } from '../pricing'
 import { CheckField, FormSelect } from '../components/Fields'
 import { PageHeader, Pill } from '../components/ui'
 
 type DonationKind = 'proxy' | 'api' | 'vendor'
 
 const kinds = [
-  {
-    id: 'proxy' as const,
-    icon: Network,
-    label: 'HTTP 代理',
-    note: '最需要的一类',
-  },
-  {
-    id: 'api' as const,
-    icon: KeyRound,
-    label: 'API 凭据',
-    note: '需限额与并发上限',
-  },
-  {
-    id: 'vendor' as const,
-    icon: CloudCog,
-    label: '商家捐赠',
-    note: '特殊渠道，邮件确认',
-  },
+  { id: 'proxy' as const, icon: Network, label: 'HTTP 代理', note: '最需要的一类' },
+  { id: 'api' as const, icon: KeyRound, label: 'API 凭据', note: '真实周期检测' },
+  { id: 'vendor' as const, icon: CloudCog, label: '商家捐赠', note: '特殊渠道，邮件确认' },
 ]
 
-/* One monitoring pass costs roughly what the 中 preset costs. Used to project
- * how long a donated quota will last. */
-const PASS = estimateRun(presets[1].config)
-
-function projectExhaustion(quotaUsd: number, intervalMinutes: number, multiplier: number) {
-  const perPass = estimateCost(PASS.inputTokens, PASS.outputTokens, DEFAULT_PRICE, multiplier)
-  if (perPass <= 0 || intervalMinutes <= 0) return null
-  const passesPerDay = 1440 / intervalMinutes
-  const days = quotaUsd / (perPass * passesPerDay)
-  return { perPass, passesPerDay, days }
+const phaseLabel: Record<string, string> = {
+  queued: '等待验证', identity_probe: '正在验证凭据与分组', identity_probe_failed: '凭据验证失败',
+  group_mismatch: '检测分组与所选分组不一致', testing: '正在执行模型检测', scheduling: '正在创建检测任务',
+  active: '已激活，等待下一轮', model_unavailable: '模型不可用，等待重试', quota_exhausted: '额度不足，已暂停',
+  registry_mismatch: '供应商配置已变化', scheduler_failed: '调度失败，等待重试',
 }
 
 function formatDays(days: number): string {
+  if (!Number.isFinite(days)) return '无法估算'
   if (days < 1) return `${Math.max(1, Math.round(days * 24))} 小时`
   if (days < 60) return `${days.toFixed(1)} 天`
   return `${(days / 30).toFixed(1)} 个月`
 }
 
+function errorText(error: unknown): string {
+  if (error instanceof ContributionApiError) {
+    return `${error.message}${error.code ? ` · ${error.code}` : ''}${error.requestId ? ` · 请求 ${error.requestId}` : ''}`
+  }
+  return error instanceof Error ? error.message : '请求失败'
+}
+
 export function DonatePage() {
-  const [kind, setKind] = useState<DonationKind>('proxy')
+  const [kind, setKind] = useState<DonationKind>('api')
   const [baseUrl, setBaseUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [quota, setQuota] = useState(10)
+  const [concurrency, setConcurrency] = useState(2)
   const [interval, setInterval] = useState(240)
-  const [multiplier, setMultiplier] = useState(0.2)
+  const [quote, setQuote] = useState<DonationQuote | null>(null)
+  const [quoteError, setQuoteError] = useState<string | null>(null)
+  const [quoteLoading, setQuoteLoading] = useState(false)
+  const [groupId, setGroupId] = useState('')
   const [consent, setConsent] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [receipt, setReceipt] = useState<DonationReceipt | null>(null)
-  const pendingSubmission = useRef<{
-    fingerprint: string
-    idempotencyKey: string
-    prepared?: PreparedDonationSubmission
-  } | null>(null)
+  const [status, setStatus] = useState<DonationStatus | null>(null)
+  const pendingSubmission = useRef<{ fingerprint: string; idempotencyKey: string; prepared?: PreparedDonationSubmission } | null>(null)
+
+  useEffect(() => {
+    if (kind !== 'api' || !baseUrl.trim() || quota < 1 || concurrency < 1 || interval < 30) {
+      setQuote(null); setQuoteError(null); setGroupId(''); return
+    }
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => {
+      setQuoteLoading(true); setQuoteError(null)
+      void quoteApiDonation({ baseUrl: baseUrl.trim(), quotaUsd: quota, concurrency, intervalMinutes: interval, signal: controller.signal })
+        .then((value) => {
+          setQuote(value)
+          setGroupId((current) => value.groups.some((group) => group.id === current) ? current : value.groups[0]?.id ?? '')
+        })
+        .catch((error) => {
+          if (!controller.signal.aborted) { setQuote(null); setGroupId(''); setQuoteError(errorText(error)) }
+        })
+        .finally(() => { if (!controller.signal.aborted) setQuoteLoading(false) })
+    }, 450)
+    return () => { window.clearTimeout(timer); controller.abort() }
+  }, [baseUrl, concurrency, interval, kind, quota])
+
+  useEffect(() => {
+    if (!receipt) return
+    const controller = new AbortController()
+    let timer = 0
+    const poll = async () => {
+      try { setStatus(await fetchDonationStatus(receipt.status_url, receipt.revocation_token, controller.signal)) }
+      catch (error) { if (!controller.signal.aborted) toast.error(errorText(error)) }
+      if (!controller.signal.aborted) timer = window.setTimeout(() => void poll(), 2000)
+    }
+    void poll()
+    return () => { controller.abort(); window.clearTimeout(timer) }
+  }, [receipt])
+
+  const selectedGroup = quote?.groups.find((group) => group.id === groupId) ?? null
+  const projection = useMemo(() => {
+    if (!selectedGroup || selectedGroup.estimated_cost_usd <= 0 || interval <= 0) return null
+    const passesPerDay = 1440 / interval
+    return { passesPerDay, days: quota / (selectedGroup.estimated_cost_usd * passesPerDay) }
+  }, [interval, quota, selectedGroup])
 
   async function submitDonation() {
+    if (!quote || !selectedGroup) return
     setSubmitting(true)
     try {
-      const fingerprint = JSON.stringify({ baseUrl: baseUrl.trim(), apiKey, quota, interval })
+      const fingerprint = JSON.stringify({ baseUrl: baseUrl.trim(), apiKey, quota, concurrency, interval, groupId })
       if (pendingSubmission.current?.fingerprint !== fingerprint) {
-        pendingSubmission.current = { fingerprint, idempotencyKey: crypto.randomUUID() }
+        pendingSubmission.current = { fingerprint, idempotencyKey: crypto.randomUUID(), prepared: { quoteToken: quote.quote_token } }
       }
       const created = await submitApiDonation({
-        baseUrl: baseUrl.trim(), apiKey, quotaUsd: quota, intervalMinutes: interval,
-        idempotencyKey: pendingSubmission.current.idempotencyKey,
-        prepared: pendingSubmission.current.prepared,
-        onPrepared: (prepared) => {
-          if (pendingSubmission.current?.fingerprint === fingerprint) pendingSubmission.current.prepared = prepared
-        },
+        baseUrl: baseUrl.trim(), apiKey, quotaUsd: quota, concurrency, intervalMinutes: interval, groupId,
+        idempotencyKey: pendingSubmission.current.idempotencyKey, prepared: pendingSubmission.current.prepared,
       })
-      pendingSubmission.current = null
-      setApiKey('')
-      setConsent(false)
-      setReceipt(created)
-      toast.success('凭据已进入隔离区')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '提交失败')
-    } finally {
-      setSubmitting(false)
-    }
+      pendingSubmission.current = null; setApiKey(''); setConsent(false); setReceipt(created)
+      toast.success('凭据已进入自动验证队列')
+    } catch (error) { toast.error(errorText(error)) }
+    finally { setSubmitting(false) }
   }
 
-  /* The donor should not have to say which vendor or price group their key
-     belongs to — it is inferable from the endpoint, and asking invites errors. */
-  const detected = useMemo(() => {
-    const host = baseUrl.trim().replace(/^https?:\/\//, '').split('/')[0]
-    if (!host) return null
-    return providers.find((provider) => host.endsWith(provider.endpoint)) ?? null
-  }, [baseUrl])
-
-  const projection = useMemo(
-    () => projectExhaustion(quota, interval, multiplier),
-    [interval, multiplier, quota],
-  )
+  const progress = status?.progress_total ? Math.min(100, Math.round(status.progress_current / status.progress_total * 100)) : 0
 
   return (
     <div className="stack">
-      <PageHeader
-        title="捐赠节点"
-        description="观测需要多样的出口网络与账号。凭据只在你限定的范围内使用，随时可撤销。"
-      />
+      <PageHeader title="捐赠节点" description="观测需要多样的出口网络与账号。凭据只在限定额度和频率内使用，随时可撤销。" />
 
-      <RadioGroup.Root
-        className="choice-grid choice-grid-3"
-        value={kind}
-        onValueChange={(value) => setKind(value as DonationKind)}
-        aria-label="捐赠类型"
-      >
+      <RadioGroup.Root className="choice-grid choice-grid-3" value={kind} onValueChange={(value) => setKind(value as DonationKind)} aria-label="捐赠类型">
         {kinds.map(({ id, icon: Icon, label, note }) => (
           <RadioGroup.Item value={id} key={id} asChild>
             <button type="button" className={kind === id ? 'choice is-active' : 'choice'}>
-              <span className="choice-icon">
-                <Icon size={17} />
-              </span>
-              <span className="choice-text">
-                <strong>{label}</strong>
-                <small>{note}</small>
-              </span>
+              <span className="choice-icon"><Icon size={17} /></span>
+              <span className="choice-text"><strong>{label}</strong><small>{note}</small></span>
               {kind === id && <Check size={16} />}
             </button>
           </RadioGroup.Item>
@@ -138,232 +136,70 @@ export function DonatePage() {
 
       {kind === 'proxy' && (
         <section className="card card-pad">
-          <div className="step-head">
-            <span className="step-num">1</span>
-            <div>
-              <h2>捐赠 HTTP 代理</h2>
-              <p>这是目前最缺的一类资源。</p>
-            </div>
-          </div>
-          <p className="lead-note">
-            没有足够的独立出口，检测就只能从少数固定 IP 发出——这些 IP 会被中转商识别并「洗白」，
-            即对来自它们的请求单独路由到真模型，使检测结果失去意义。捐赠代理直接提高这件事的成本。
-          </p>
-          <div className="field-grid">
-            <FormSelect label="代理协议" options={['HTTP', 'HTTPS', 'SOCKS5']} />
-            <FormSelect
-              label="出口地区"
-              options={['亚太', '北美', '欧洲', '南美', '非洲', '其他']}
-            />
-            <label className="field">
-              <span>地址与端口</span>
-              <input placeholder="host:port" spellCheck={false} />
-            </label>
-            <label className="field">
-              <span>并发上限</span>
-              <input type="number" min={1} defaultValue={4} />
-            </label>
-            <FormSelect
-              label="网络类型"
-              options={['住宅', '机房', '移动', '机构']}
-              full
-            />
-          </div>
-          <div className="form-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => toast.success('已记录代理捐赠意向（本地原型）')}
-            >
-              提交代理
-            </button>
-            <span>原型不会发送任何内容</span>
-          </div>
+          <div className="step-head"><span className="step-num">1</span><div><h2>捐赠 HTTP 代理</h2><p>代理捐赠仍通过单独通道审核。</p></div></div>
+          <p className="lead-note">独立出口可以降低固定检测 IP 被识别并单独路由的风险。此入口暂不接收代理密码。</p>
+          <div className="form-actions"><button type="button" className="btn btn-primary" disabled>暂未开放</button></div>
         </section>
       )}
 
       {kind === 'api' && (
         <div className="split">
           <section className="card card-pad">
-            <div className="step-head">
-              <span className="step-num">1</span>
-              <div>
-                <h2>捐赠 API 凭据</h2>
-                <p>建议设置额度上限，并只授权到检测所需的模型。</p>
-              </div>
-            </div>
-
+            <div className="step-head"><span className="step-num">1</span><div><h2>捐赠 API 凭据</h2><p>服务器会自动归属供应商、验证分组并运行完整模型组。</p></div></div>
             <div className="field-grid">
-              <label className="field is-full">
-                <span>base_url</span>
-                <input
-                  type="url"
-                  value={baseUrl}
-                  onChange={(event) => setBaseUrl(event.target.value)}
-                  placeholder="https://api.relay-a.example"
-                  spellCheck={false}
-                />
-              </label>
-              <label className="field is-full">
-                <span>api_key</span>
-                <div className="secret">
-                  <KeyRound size={16} aria-hidden="true" />
-                  <input
-                    type={showKey ? 'text' : 'password'}
-                    value={apiKey}
-                    onChange={(event) => setApiKey(event.target.value)}
-                    placeholder="建议限额、限模型、可撤销"
-                    autoComplete="off"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowKey((value) => !value)}
-                    aria-label={showKey ? '隐藏 api_key' : '显示 api_key'}
-                  >
-                    {showKey ? <EyeOff size={17} /> : <Eye size={17} />}
-                  </button>
-                </div>
-              </label>
-              <label className="field">
-                <span>额度上限（US$）</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={quota}
-                  onChange={(event) => setQuota(Number(event.target.value) || 0)}
-                />
-              </label>
-              <label className="field">
-                <span>并发限制</span>
-                <input type="number" min={1} max={16} defaultValue={2} />
-              </label>
-              <label className="field">
-                <span>检测间隔（分钟）</span>
-                <input
-                  type="number"
-                  min={30}
-                  value={interval}
-                  onChange={(event) => setInterval(Number(event.target.value) || 0)}
-                />
-              </label>
-              <label className="field">
-                <span>分组倍率</span>
-                <input
-                  type="number"
-                  min={0}
-                  step={0.01}
-                  value={multiplier}
-                  onChange={(event) => setMultiplier(Number(event.target.value) || 0)}
-                />
-              </label>
+              <label className="field is-full"><span>base_url</span><input type="url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" spellCheck={false} /></label>
+              <label className="field is-full"><span>api_key</span><div className="secret"><KeyRound size={16} aria-hidden="true" /><input type={showKey ? 'text' : 'password'} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="建议限额、限模型、可撤销" autoComplete="off" /><button type="button" onClick={() => setShowKey((value) => !value)} aria-label={showKey ? '隐藏 api_key' : '显示 api_key'}>{showKey ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>
+              <label className="field"><span>额度上限（US$）</span><input type="number" min={1} max={10000} value={quota} onChange={(event) => setQuota(Number(event.target.value) || 0)} /></label>
+              <label className="field"><span>并发限制</span><input type="number" min={1} max={16} value={concurrency} onChange={(event) => setConcurrency(Number(event.target.value) || 0)} /></label>
+              <label className="field"><span>检测间隔（分钟）</span><input type="number" min={30} max={10080} value={interval} onChange={(event) => setInterval(Number(event.target.value) || 0)} /></label>
+              <FormSelect label="检测分组" value={groupId} onValueChange={setGroupId} options={quote?.groups.map((group) => ({ value: group.id, label: `${group.name} · ${group.multiplier}x` })) ?? [{ value: 'waiting', label: quoteLoading ? '正在读取…' : '等待识别供应商' }]} />
             </div>
 
             <div className="detected-row">
-              <span className="t-label">自动识别</span>
-              {detected ? (
-                <span>
-                  {providerKindLabel[detected.kind]} · <strong>{detected.name}</strong> · 分组将在首次检测后确认
-                </span>
-              ) : (
-                <span className="t-faint">
-                  {baseUrl.trim() ? '未匹配到已知提供商，将在首次检测后归类' : '填写 base_url 后自动识别商家与分组'}
-                </span>
-              )}
+              <span className="t-label">供应商归属</span>
+              {quote ? <span>{providerKindLabel[quote.provider.kind]} · <strong>{quote.provider.name}</strong> · 精确域名匹配</span> : <span className={quoteError ? 'is-bad' : 't-faint'}>{quoteError ?? (quoteLoading ? '正在读取 registry…' : '填写 base_url 后自动读取')}</span>}
             </div>
-
-            <CheckField checked={consent} onCheckedChange={setConsent}>
-              我同意服务端在所列额度和频率内使用该凭据；凭据将加密保存，并可使用一次性撤销令牌撤销。
-            </CheckField>
-
-            {receipt && (
-              <div className="detected-row" role="status">
-                <span className="t-label">撤销令牌</span>
-                <span>
-                  <code>{receipt.revocation_token}</code>
-                  <br />
-                  <span className="t-faint">捐赠 {receipt.donation_id} · 隔离中 · 指纹尾部 {receipt.credential_fingerprint_tail}</span>
-                </span>
+            {selectedGroup && (
+              <div className="donation-group-detail">
+                <strong>{selectedGroup.name} · {selectedGroup.multiplier}x</strong>
+                <span>{selectedGroup.models.length} 个模型，每个模型 {selectedGroup.requests_per_model} 个请求</span>
+                <div className="model-chip-row">{selectedGroup.models.map((model) => <code key={model}>{model}</code>)}</div>
               </div>
             )}
 
+            <CheckField checked={consent} onCheckedChange={setConsent}>我同意服务端在所列额度和频率内使用该凭据；凭据将加密保存，并可使用一次性撤销令牌撤销。</CheckField>
             <div className="form-actions">
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={!baseUrl.trim() || !apiKey.trim() || !consent || submitting}
-                onClick={() => void submitDonation()}
-              >
-                {submitting ? '提交中…' : '提交凭据'}
-              </button>
-              <span>成功后只显示一次撤销令牌</span>
+              <button type="button" className="btn btn-primary" disabled={!quote || !selectedGroup || !apiKey.trim() || !consent || submitting} onClick={() => void submitDonation()}>{submitting ? '提交中…' : '提交并开始验证'}</button>
+              <span>撤销令牌仅在本次页面会话中显示</span>
             </div>
+
+            {receipt && (
+              <section className="donation-status" aria-live="polite">
+                <div className="run-progress-head"><div><h2>{phaseLabel[status?.phase ?? 'queued'] ?? status?.phase ?? '等待状态'}</h2><p>{status?.current_model ? `当前模型 ${status.current_model}` : `捐赠 ${receipt.donation_id}`}</p></div><strong>{progress}%</strong></div>
+                <progress max={100} value={progress}>{progress}%</progress>
+                <div className="donation-status-grid">
+                  <div><span>完成请求</span><b>{status?.progress_current ?? 0} / {status?.progress_total ?? (selectedGroup?.requests_per_model ?? 64) * (selectedGroup?.models.length ?? 1)}</b></div>
+                  <div><span>分组归属</span><b>{status?.group_attribution === 'verified' ? '自动验证' : status?.group_attribution === 'donor_declared' ? '用户声明' : '待确认'}</b></div>
+                  <div><span>已用额度</span><b>{formatUsd(status?.quota.spent_usd ?? 0)}</b></div>
+                  <div><span>预留额度</span><b>{formatUsd(status?.quota.reserved_usd ?? 0)}</b></div>
+                </div>
+                {status?.errors && status.errors.length > 0 && <ul className="donation-errors">{status.errors.map((error, index) => <li key={`${error.at}-${error.code}-${index}`}><TriangleAlert size={15} /><span><strong>{error.model ? `${error.model} · ` : ''}{error.code}</strong><small>{error.message}{error.http_status ? ` · HTTP ${error.http_status}` : ''} · {error.retryable ? '将自动重试' : '需要检查配置或权限'}</small></span></li>)}</ul>}
+                <div className="revocation-token"><span>撤销令牌</span><code>{receipt.revocation_token}</code></div>
+              </section>
+            )}
           </section>
 
           <aside className="card split-aside">
-            <div className="card-head">
-              <div className="card-head-text">
-                <h2>风险与用量</h2>
-                <p>提交前请确认这两项。</p>
-              </div>
-            </div>
-
-            <div className="risk-block">
-              <ShieldAlert size={17} aria-hidden="true" />
-              <div>
-                <strong>捐赠 key 可能被单独路由</strong>
-                <p>
-                  商家若识别出捐赠账号，可对其单独提供真模型。因此捐赠凭据的通过结果不会提升正式置信率，
-                  只有失败结果会触发复核。
-                </p>
-              </div>
-            </div>
-
-            {projection && (
-              <ul className="estimate-list">
-                <li>
-                  <span>单次检测成本</span>
-                  <b>{formatUsd(projection.perPass)}</b>
-                </li>
-                <li>
-                  <span>每天检测次数</span>
-                  <b>{projection.passesPerDay.toFixed(1)}</b>
-                </li>
-                <li>
-                  <span>预计耗尽时间</span>
-                  <b>{formatDays(projection.days)}</b>
-                </li>
-              </ul>
-            )}
-            <p className="estimate-note">
-              按中等强度预设（{PASS.requests} 请求）估算，实际用量随分组倍率与探针选择变化。
-            </p>
+            <div className="card-head"><div className="card-head-text"><h2>风险与用量</h2><p>以 registry 中的实际模型组估算。</p></div></div>
+            <div className="risk-block"><ShieldAlert size={17} aria-hidden="true" /><div><strong>捐赠 key 可能被单独路由</strong><p>检测结果会保留自动验证或用户声明归属，同时单独展示网络可用率。</p></div></div>
+            {selectedGroup && <ul className="estimate-list"><li><span>每轮预计成本</span><b>{formatUsd(selectedGroup.estimated_cost_usd)}</b></li><li><span>每轮最高预留</span><b>{formatUsd(selectedGroup.maximum_cost_usd)}</b></li><li><span>每天检测轮数</span><b>{projection?.passesPerDay.toFixed(1) ?? '—'}</b></li><li><span>预计可持续</span><b>{projection ? formatDays(projection.days) : '—'}</b></li></ul>}
+            <p className="estimate-note">运行前预留整轮最高成本，完成后按上游 usage 结算；没有 usage 时使用保守估算。</p>
           </aside>
         </div>
       )}
 
       {kind === 'vendor' && (
-        <section className="card card-pad">
-          <div className="step-head">
-            <span className="step-num">1</span>
-            <div>
-              <h2>商家捐赠</h2>
-              <p>走独立渠道，不在此页面收取凭据。</p>
-            </div>
-          </div>
-          <p className="lead-note">
-            商家提供的账号与数据会被单独标记为自报来源，<strong>不计入公开的综合置信率</strong>，
-            也不能由商家自行批准与自己相关的变更。这是为了避免被检测方同时是评分方。
-          </p>
-          <div className="vendor-contact">
-            <Mail size={18} aria-hidden="true" />
-            <div>
-              <strong>发起邮件确认</strong>
-              <p>请从商家域名下的邮箱发起，我们会回复一份需要签署的范围与撤销条款。</p>
-            </div>
-            <Pill tone="info" size="sm">
-              需邮件确认
-            </Pill>
-          </div>
+        <section className="card card-pad"><div className="step-head"><span className="step-num">1</span><div><h2>商家捐赠</h2><p>走独立渠道，不在此页面收取凭据。</p></div></div><p className="lead-note">商家提供的数据单独标记为自报来源，不计入公开综合真实性通过率。</p><div className="vendor-contact"><Mail size={18} aria-hidden="true" /><div><strong>发起邮件确认</strong><p>请从商家域名邮箱发起，我们会回复范围与撤销条款。</p></div><Pill tone="info" size="sm">需邮件确认</Pill></div>
         </section>
       )}
     </div>

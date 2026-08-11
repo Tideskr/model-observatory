@@ -17,6 +17,8 @@ export interface RawObservation {
   attempts?: number
   statusCode?: number | null
   retryable?: boolean
+  inputTokens?: number
+  outputTokens?: number
 }
 
 export interface ScoringResult {
@@ -57,6 +59,8 @@ export function scoreObservation(run: RunRecord, raw: RawObservation, seed: Scor
     http_status: raw.statusCode ?? null,
     retryable: raw.retryable ?? false,
     safe_message: raw.safeMessage ?? null,
+    input_tokens: raw.inputTokens ?? null,
+    output_tokens: raw.outputTokens ?? null,
   }
   if (raw.status !== 'ok') {
     return {

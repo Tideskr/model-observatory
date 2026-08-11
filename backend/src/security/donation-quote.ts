@@ -13,6 +13,7 @@ export interface DonationQuote {
   targetOrigin: string
   targetBaseUrl: string
   targetHostname: string
+  providerSlug: string
   constraints: DonationConstraints
   disclosureVersion: typeof DONATION_DISCLOSURE_VERSION
   issuedAt: string
@@ -24,7 +25,7 @@ function signature(payload: string, secret: string): Buffer {
 }
 
 export function issueDonationQuote(
-  value: Pick<DonationQuote, 'kind' | 'targetOrigin' | 'targetBaseUrl' | 'targetHostname' | 'constraints'>,
+  value: Pick<DonationQuote, 'kind' | 'targetOrigin' | 'targetBaseUrl' | 'targetHostname' | 'providerSlug' | 'constraints'>,
   secret: string,
   ttlSeconds: number,
   now = new Date(),
@@ -58,7 +59,7 @@ export function verifyDonationQuote(token: string, secret: string, now = new Dat
   const quote = value as Partial<DonationQuote>
   if (
     typeof quote.quoteId !== 'string' || quote.kind !== 'api' || typeof quote.targetOrigin !== 'string' ||
-    typeof quote.targetBaseUrl !== 'string' || typeof quote.targetHostname !== 'string' || typeof quote.expiresAt !== 'string' ||
+    typeof quote.targetBaseUrl !== 'string' || typeof quote.targetHostname !== 'string' || typeof quote.providerSlug !== 'string' || typeof quote.expiresAt !== 'string' ||
     quote.disclosureVersion !== DONATION_DISCLOSURE_VERSION || !Value.Check(DonationConstraintsSchema, quote.constraints)
   ) {
     throw new AppError(400, 'invalid_donation_quote', 'The donation quote payload is incomplete.')

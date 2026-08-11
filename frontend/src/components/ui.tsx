@@ -100,6 +100,7 @@ export function Sparkline({
   width?: number
   height?: number
 }) {
+  if (values.length < 2) return <span className="spark-empty">暂无趋势</span>
   const pad = 4
   const min = Math.min(...values)
   const max = Math.max(...values)
@@ -177,6 +178,7 @@ function GroupRow({ group }: { group: ProviderGroup }) {
       <ul className="group-models">
         {group.models.map((entry) => {
           const value = modelConfidence(entry)
+          const availability = entry.availabilityBySource?.donated ?? entry.availabilityBySource?.community ?? null
           return (
             <li key={entry.model}>
               <code>{entry.model}</code>
@@ -184,6 +186,10 @@ function GroupRow({ group }: { group: ProviderGroup }) {
                 <span className="model-empty">无样本</span>
               ) : (
                 <b className={`model-value is-${meterTone(value)}`}>{value}%</b>
+              )}
+              {availability != null && <span className="model-availability">可用 {availability}%</span>}
+              {entry.attribution && (entry.attribution.verified > 0 || entry.attribution.donor_declared > 0) && (
+                <span className="model-attribution">已验证 {entry.attribution.verified} · 用户声明 {entry.attribution.donor_declared}</span>
               )}
             </li>
           )

@@ -13,6 +13,7 @@ interface RunRow {
   quote_id: string
   request_digest: string
   status: RunStatus
+  evidence_source: RunRecord['evidenceSource'] | null
   target_origin: string
   target_base_url: string
   target_hostname: string
@@ -30,7 +31,7 @@ interface RunRow {
   lease_version: number
 }
 
-const runColumns = `id,quote_id,request_digest,status,target_origin,target_base_url,target_hostname,model,
+const runColumns = `id,quote_id,request_digest,status,evidence_source,target_origin,target_base_url,target_hostname,model,
   run_config,disclosure_version,scoring_release_id,owner_token_hash,idempotency_key,credential_handle,created_at,expires_at,
   worker_id,lease_expires_at,lease_version`
 
@@ -40,6 +41,7 @@ function mapRun(row: RunRow): RunRecord {
     quoteId: row.quote_id,
     requestDigest: row.request_digest,
     status: row.status,
+    ...(row.evidence_source ? { evidenceSource: row.evidence_source } : {}),
     targetOrigin: row.target_origin,
     targetBaseUrl: row.target_base_url,
     targetHostname: row.target_hostname,
@@ -105,9 +107,9 @@ export class PostgresRunStore implements RunStore {
         `INSERT INTO private_runs
          (id,quote_id,request_digest,status,evidence_source,target_origin,target_base_url,target_hostname,model,run_config,
           disclosure_version,scoring_release_id,owner_token_hash,idempotency_key,credential_handle,expires_at,created_at)
-         VALUES ($1,$2,$3,$4,NULL,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
          ON CONFLICT (idempotency_key) DO NOTHING RETURNING ${runColumns}`,
-        [record.id, record.quoteId, record.requestDigest, record.status, record.targetOrigin, record.targetBaseUrl, record.targetHostname, record.model, record.config, record.disclosureVersion, record.scoringReleaseId, record.ownerTokenHash, record.idempotencyKey, record.credentialHandle, record.expiresAt, record.createdAt],
+        [record.id, record.quoteId, record.requestDigest, record.status, record.evidenceSource ?? null, record.targetOrigin, record.targetBaseUrl, record.targetHostname, record.model, record.config, record.disclosureVersion, record.scoringReleaseId, record.ownerTokenHash, record.idempotencyKey, record.credentialHandle, record.expiresAt, record.createdAt],
       )
       let output = inserted.rows[0]
       let created = true

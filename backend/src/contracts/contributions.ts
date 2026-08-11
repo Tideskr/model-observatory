@@ -19,6 +19,7 @@ export const DonationQuoteRequestSchema = Type.Object(
     kind: Type.Literal('api'),
     base_url: Type.String({ minLength: 1, maxLength: 2048 }),
     constraints: DonationConstraintsSchema,
+    group_id: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
   },
   { additionalProperties: false },
 )
@@ -33,6 +34,14 @@ export const DonationQuoteResponseSchema = Type.Intersect([
       target_origin: Type.String({ format: 'uri' }),
       target_base_url: Type.String({ format: 'uri' }),
       target_hostname: Type.String(),
+      provider: Type.Object({
+        slug: Type.String(), name: Type.String(),
+        kind: Type.Union([Type.Literal('relay'), Type.Literal('official'), Type.Literal('official_proxy')]),
+      }, { additionalProperties: false }),
+      groups: Type.Array(Type.Object({
+        id: Type.String(), name: Type.String(), multiplier: Type.Number(), models: Type.Array(Type.String()),
+        requests_per_model: Type.Integer(), estimated_cost_usd: Type.Number(), maximum_cost_usd: Type.Number(),
+      }, { additionalProperties: false })),
       constraints: DonationConstraintsSchema,
       disclosure_version: Type.Literal(DONATION_DISCLOSURE_VERSION),
       initial_status: Type.Literal('quarantined'),
@@ -54,6 +63,7 @@ export const DonationCreateRequestSchema = Type.Object(
   {
     quote_token: Type.String({ minLength: 64, maxLength: 32_768 }),
     api_key: Type.String({ minLength: 1, maxLength: 4096 }),
+    group_id: Type.String({ minLength: 1, maxLength: 128 }),
     consent: Type.Object(
       {
         disclosure_version: Type.Literal(DONATION_DISCLOSURE_VERSION),
@@ -73,6 +83,14 @@ export const DonationStatusSchema = Type.Union([
   Type.Literal('rejected'),
 ])
 export type DonationStatus = Static<typeof DonationStatusSchema>
+
+export const DonationErrorSchema = Type.Object({
+  stage: Type.String(), code: Type.String(), message: Type.String(),
+  model: Type.Union([Type.String(), Type.Null()]),
+  http_status: Type.Union([Type.Integer(), Type.Null()]),
+  retryable: Type.Boolean(), at: Type.String({ format: 'date-time' }),
+}, { additionalProperties: false })
+export type DonationError = Static<typeof DonationErrorSchema>
 
 export const DonationCreateResponseSchema = Type.Intersect([
   ApiMetaSchema,
@@ -99,6 +117,17 @@ export const DonationStatusResponseSchema = Type.Intersect([
       status: DonationStatusSchema,
       target_origin: Type.String({ format: 'uri' }),
       target_base_url: Type.String({ format: 'uri' }),
+      provider: Type.Object({ slug: Type.String(), name: Type.String() }, { additionalProperties: false }),
+      group: Type.Object({ id: Type.String(), name: Type.String(), multiplier: Type.Number(), models: Type.Array(Type.String()) }, { additionalProperties: false }),
+      detected_group_id: Type.Union([Type.String(), Type.Null()]),
+      group_attribution: Type.Union([Type.Literal('pending'), Type.Literal('verified'), Type.Literal('donor_declared')]),
+      phase: Type.String(),
+      progress_current: Type.Integer(), progress_total: Type.Integer(),
+      current_model: Type.Union([Type.String(), Type.Null()]),
+      next_run_at: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]),
+      last_checked_at: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]),
+      quota: Type.Object({ limit_usd: Type.Number(), spent_usd: Type.Number(), reserved_usd: Type.Number(), remaining_usd: Type.Number() }, { additionalProperties: false }),
+      errors: Type.Array(DonationErrorSchema),
       constraints: DonationConstraintsSchema,
       credential_fingerprint_tail: Type.String(),
       created_at: Type.String({ format: 'date-time' }),

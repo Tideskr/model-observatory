@@ -6,6 +6,7 @@ export interface RunRecord {
   quoteId: string
   requestDigest: string
   status: RunStatus
+  evidenceSource?: 'vendor' | 'donated' | 'community'
   targetOrigin: string
   targetBaseUrl: string
   targetHostname: string

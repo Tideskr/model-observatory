@@ -6,6 +6,7 @@ import { DONATION_DISCLOSURE_VERSION } from '../src/contracts/contributions.js'
 import { loadConfig } from '../src/config.js'
 import { createMemoryServices } from '../src/services.js'
 import { MemoryPublicRepository } from '../src/store/public-repository.js'
+import { createProviderRegistry, parseProviderRegistry } from '../src/registry/catalog.js'
 
 const config = loadConfig({
   APP_ENV: 'test',
@@ -27,8 +28,19 @@ const pinnedProbe: PublicRegistryItem = {
   metadata: {},
 }
 
+const providerRegistry = createProviderRegistry(parseProviderRegistry({
+  schema_version: 2,
+  pricing: { input_per_million_usd: 1.25, output_per_million_usd: 10 },
+  providers: [{
+    slug: 'example', name: 'Example', kind: 'relay',
+    domains: [{ hostname: 'api.example.com', role: 'primary', default_base_path: '/v1', status: 'active' }],
+    group_detection: { probe_model: '__group_probe__' },
+    groups: [{ id: 'default', name: 'Default', aliases: [], multiplier: 1, models: ['gpt-5.6-sol'] }],
+  }],
+}))
+
 test('API donation is quarantined, capability-protected, and destroys its credential on revoke', async (context) => {
-  const services = createMemoryServices(config)
+  const services = createMemoryServices(config, providerRegistry)
   const app = await buildApp({ config, services, logger: false })
   context.after(() => app.close())
 
@@ -37,12 +49,15 @@ test('API donation is quarantined, capability-protected, and destroys its creden
     url: '/api/v1/donations/quote',
     payload: {
       kind: 'api',
-      base_url: 'https://api.example.com/v1',
+      base_url: 'api.example.com/v1',
       constraints: { quota_usd: 10, concurrency: 2, interval_minutes: 240, expires_in_days: 7 },
     },
   })
   assert.equal(quoteResponse.statusCode, 200)
   assert.equal(quoteResponse.json().initial_status, 'quarantined')
+  assert.equal(quoteResponse.json().target_base_url, 'https://api.example.com/v1')
+  assert.equal(quoteResponse.json().provider.slug, 'example')
+  assert.deepEqual(quoteResponse.json().groups[0].models, ['gpt-5.6-sol'])
   assert.deepEqual(quoteResponse.json().credential_treatment, {
     storage: 'aes-256-gcm-envelope', raw_value_in_business_record: false, deletion: 'on-revoke-or-expiry',
   })
@@ -52,6 +67,7 @@ test('API donation is quarantined, capability-protected, and destroys its creden
   const createPayload = {
     quote_token: quoteResponse.json().quote_token,
     api_key: secret,
+    group_id: 'default',
     consent: { disclosure_version: DONATION_DISCLOSURE_VERSION, accepted_at: new Date().toISOString() },
   }
   const createResponse = await app.inject({

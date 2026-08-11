@@ -26,6 +26,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=backend-build /build/backend/dist ./dist
 COPY backend/migrations ./migrations
 COPY scoring-releases/gpt56-v3 /app/scoring-releases/gpt56-v3
+COPY registry /app/registry
 COPY --from=frontend-build /build/frontend/dist /app/public
 USER node
 EXPOSE 8787

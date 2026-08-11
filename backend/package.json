@@ -15,7 +15,8 @@
     "check": "tsc --noEmit -p tsconfig.json",
     "lint": "oxlint src test",
     "test": "node --import tsx --test test/**/*.test.ts",
-    "scoring:import": "tsx src/scoring/import-cli.ts"
+    "scoring:import": "tsx src/scoring/import-cli.ts",
+    "registry:sync": "tsx src/registry/sync-cli.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

@@ -13,9 +13,10 @@ import {
   RegistryProposalResponseSchema,
   type RegistryProposalRequest,
 } from '../contracts/contributions.js'
-import { apiMeta } from '../contracts/common.js'
+import { apiMeta, TERMINAL_RUN_STATUSES } from '../contracts/common.js'
 import { AppError } from '../errors.js'
 import { assertSafeTargetHostname } from '../executor/ssrf.js'
+import { donationModelEstimate } from '../domain/donation-plan.js'
 import { deriveDonationRevocationCapability, verifyCapability } from '../security/capability.js'
 import { issueDonationQuote, verifyDonationQuote } from '../security/donation-quote.js'
 import type { AppServices } from '../services.js'
@@ -36,9 +37,10 @@ const CreateHeadersSchema = Type.Object(
 function normalizeTarget(value: string): { origin: string; baseUrl: string; hostname: string } {
   let url: URL
   try {
-    url = new URL(value)
+    const input = value.trim()
+    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(input) ? input : `https://${input}`)
   } catch {
-    throw new AppError(400, 'invalid_target', 'base_url must be an absolute HTTPS URL.')
+    throw new AppError(400, 'invalid_target', 'base_url must be a valid HTTPS URL or hostname.')
   }
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
     throw new AppError(400, 'invalid_target', 'base_url must use HTTPS and cannot contain credentials, query parameters, or fragments.')
@@ -61,19 +63,33 @@ async function ownedDonation(id: string, authorization: string, config: AppConfi
     throw new AppError(404, 'donation_not_found', 'The donation does not exist.')
   }
   if (donation.status !== 'revoked' && donation.status !== 'expired' && new Date(donation.expiresAt).getTime() <= Date.now()) {
+    await cancelDonationRuns(donation.id, services)
     donation = await services.contributionStore.expireDonation(donation.id)
     await services.credentialVault.delete(donation.credentialHandle)
   }
   return donation
 }
 
+async function cancelDonationRuns(donationId: string, services: AppServices): Promise<void> {
+  const pendingRuns = (await services.contributionStore.listPendingDonationRuns()).filter((item) => item.donationId === donationId)
+  for (const link of pendingRuns) {
+    const run = await services.runStore.get(link.privateRunId)
+    if (!run) continue
+    if (!TERMINAL_RUN_STATUSES.has(run.status)) {
+      try { await services.runStore.transition(run.id, 'cancelled', 'cancelled', { reason: 'donation_ended' }) }
+      catch (error) { if (!(error instanceof AppError) || error.code !== 'invalid_run_transition') throw error }
+    }
+    await services.credentialVault.delete(run.credentialHandle)
+  }
+}
+
 function fingerprintTail(apiKey: string, pepper: string): string {
   return createHmac('sha256', pepper).update('model-observatory:credential-fingerprint:').update(apiKey).digest('hex').slice(-10)
 }
 
-function donationRequestDigest(quoteToken: string, apiKey: string, disclosureVersion: string, pepper: string): string {
+function donationRequestDigest(quoteToken: string, apiKey: string, groupId: string, disclosureVersion: string, pepper: string): string {
   const keyDigest = createHmac('sha256', pepper).update('donation-credential-digest:').update(apiKey).digest('hex')
-  return createHash('sha256').update(quoteToken).update(':').update(keyDigest).update(':').update(disclosureVersion).digest('hex')
+  return createHash('sha256').update(quoteToken).update(':').update(keyDigest).update(':').update(groupId).update(':').update(disclosureVersion).digest('hex')
 }
 
 function validateEvidenceUrls(values: string[]): void {
@@ -126,10 +142,21 @@ function issueUrl(config: AppConfig, proposal: RegistryProposalRequest, contentS
   return `${config.repositoryUrl}/issues/new?${query.toString()}`
 }
 
-function donationResponse(record: DonationRecord) {
+function donationResponse(record: DonationRecord, services: AppServices) {
+  const provider = services.providerRegistry.document.providers.find((item) => item.slug === record.providerSlug)
+  const group = provider?.groups.find((item) => item.id === record.groupId)
+  if (!provider || !group) throw new AppError(500, 'provider_registry_drift', 'The donation references an unavailable provider group.')
+  const remaining = Math.max(0, record.constraints.quota_usd - record.quotaSpentUsd - record.quotaReservedUsd)
   return {
     ...apiMeta(), donation_id: record.id, kind: record.kind, status: record.status,
     target_origin: record.targetOrigin, target_base_url: record.targetBaseUrl,
+    provider: { slug: provider.slug, name: provider.name },
+    group: { id: group.id, name: group.name, multiplier: group.multiplier, models: group.models },
+    detected_group_id: record.detectedGroupId, group_attribution: record.groupAttribution,
+    phase: record.phase, progress_current: record.progressCurrent, progress_total: record.progressTotal,
+    current_model: record.currentModel, next_run_at: record.nextRunAt, last_checked_at: record.lastCheckedAt,
+    quota: { limit_usd: record.constraints.quota_usd, spent_usd: record.quotaSpentUsd, reserved_usd: record.quotaReservedUsd, remaining_usd: remaining },
+    errors: record.errors,
     constraints: record.constraints, credential_fingerprint_tail: record.credentialFingerprintTail,
     created_at: record.createdAt, expires_at: record.expiresAt, revoked_at: record.revokedAt,
   }
@@ -153,10 +180,17 @@ export const contributionRoutes: FastifyPluginAsyncTypebox<ContributionRouteOpti
     },
     async (request) => {
       const target = normalizeTarget(request.body.base_url)
+      const provider = services.providerRegistry.findByHostname(target.hostname)
+      if (!provider) throw new AppError(404, 'provider_not_registered', 'This API hostname is not registered to a provider.')
+      if (provider.groups.length === 0) throw new AppError(409, 'provider_groups_unconfigured', 'This provider does not have any configured detection groups yet.')
+      if (request.body.group_id && !provider.groups.some((item) => item.id === request.body.group_id)) {
+        throw new AppError(400, 'provider_group_not_found', 'The selected group does not belong to this provider.')
+      }
       const { quote, token } = issueDonationQuote(
         {
           kind: request.body.kind, targetOrigin: target.origin, targetBaseUrl: target.baseUrl,
           targetHostname: target.hostname, constraints: request.body.constraints,
+          providerSlug: provider.slug,
         },
         config.quoteSigningSecret,
         config.quoteTtlSeconds,
@@ -164,6 +198,20 @@ export const contributionRoutes: FastifyPluginAsyncTypebox<ContributionRouteOpti
       return {
         ...apiMeta(), quote_id: quote.quoteId, quote_token: token, kind: quote.kind,
         target_origin: quote.targetOrigin, target_base_url: quote.targetBaseUrl, target_hostname: quote.targetHostname,
+        provider: { slug: provider.slug, name: provider.name, kind: provider.kind },
+        groups: provider.groups.map((group) => {
+          const estimate = donationModelEstimate({
+            input_per_million: services.providerRegistry.document.pricing.input_per_million_usd,
+            output_per_million: services.providerRegistry.document.pricing.output_per_million_usd,
+            multiplier: group.multiplier,
+          })
+          return {
+            id: group.id, name: group.name, multiplier: group.multiplier, models: group.models,
+            requests_per_model: estimate.requests,
+            estimated_cost_usd: Number((estimate.estimated_cost_usd * group.models.length).toFixed(6)),
+            maximum_cost_usd: Number((estimate.maximum_cost_usd * group.models.length).toFixed(6)),
+          }
+        }),
         constraints: quote.constraints, disclosure_version: DONATION_DISCLOSURE_VERSION,
         initial_status: 'quarantined' as const,
         credential_treatment: {
@@ -183,6 +231,9 @@ export const contributionRoutes: FastifyPluginAsyncTypebox<ContributionRouteOpti
     },
     async (request, reply) => {
       const quote = verifyDonationQuote(request.body.quote_token, config.quoteSigningSecret)
+      const provider = services.providerRegistry.document.providers.find((item) => item.slug === quote.providerSlug)
+      const group = provider?.groups.find((item) => item.id === request.body.group_id)
+      if (!provider || !group) throw new AppError(409, 'provider_registry_changed', 'The provider group changed after this quote was issued. Request a new quote.')
       const acceptedAt = new Date(request.body.consent.accepted_at).getTime()
       const now = Date.now()
       if (!Number.isFinite(acceptedAt) || acceptedAt > now + 30_000 || acceptedAt < now - 5 * 60_000) {
@@ -195,9 +246,13 @@ export const contributionRoutes: FastifyPluginAsyncTypebox<ContributionRouteOpti
       const credentialHandle = await services.credentialVault.put(request.body.api_key, `donation:${id}`, expiresAt)
       const record: DonationRecord = {
         id, quoteId: quote.quoteId,
-        requestDigest: donationRequestDigest(request.body.quote_token, request.body.api_key, request.body.consent.disclosure_version, config.tokenPepper),
+        requestDigest: donationRequestDigest(request.body.quote_token, request.body.api_key, request.body.group_id, request.body.consent.disclosure_version, config.tokenPepper),
         idempotencyKey, kind: 'api', status: 'quarantined', targetOrigin: quote.targetOrigin, targetBaseUrl: quote.targetBaseUrl,
         targetHostname: quote.targetHostname, constraints: quote.constraints, credentialHandle,
+        providerSlug: provider.slug, groupId: group.id, detectedGroupId: null, groupAttribution: 'pending',
+        phase: 'queued', progressCurrent: 0, progressTotal: group.models.length * 64,
+        currentModel: null, nextRunAt: new Date(now).toISOString(), lastCheckedAt: null,
+        quotaSpentUsd: 0, quotaReservedUsd: 0, errors: [],
         credentialFingerprintTail: fingerprintTail(request.body.api_key, config.tokenPepper),
         revocationTokenHash: revocation.hash, disclosureVersion: quote.disclosureVersion,
         createdAt: new Date(now).toISOString(), expiresAt: expiresAt.toISOString(), revokedAt: null,
@@ -224,7 +279,7 @@ export const contributionRoutes: FastifyPluginAsyncTypebox<ContributionRouteOpti
   app.get(
     '/donations/:id/status',
     { schema: { tags: ['donations'], params: IdParamsSchema, headers: AuthorizationHeadersSchema, response: { 200: DonationStatusResponseSchema } } },
-    async (request) => donationResponse(await ownedDonation(request.params.id, request.headers.authorization, config, services)),
+    async (request) => donationResponse(await ownedDonation(request.params.id, request.headers.authorization, config, services), services),
   )
 
   app.post(
@@ -232,9 +287,10 @@ export const contributionRoutes: FastifyPluginAsyncTypebox<ContributionRouteOpti
     { schema: { tags: ['donations'], params: IdParamsSchema, headers: AuthorizationHeadersSchema, response: { 200: DonationStatusResponseSchema } } },
     async (request) => {
       const donation = await ownedDonation(request.params.id, request.headers.authorization, config, services)
+      await cancelDonationRuns(donation.id, services)
       const revoked = await services.contributionStore.revokeDonation(donation.id, new Date().toISOString())
       await services.credentialVault.delete(donation.credentialHandle)
-      return donationResponse(revoked)
+      return donationResponse(revoked, services)
     },
   )
 

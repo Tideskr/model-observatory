@@ -39,6 +39,7 @@ When a reverse proxy terminates client connections, set `TRUST_PROXY` to its IP/
 - Quotes include retries in their maximum attempt/token/cost bounds. Workers reserve every attempt durably; estimates assume 40 visible output tokens while the transport enforces a 2,048-token hard ceiling that includes reasoning tokens.
 - Worker state changes are fenced by a monotonically increasing lease version. Sanitized observations are checkpointed per job so recovery skips completed work.
 - Credentials must never enter normal run rows, queue payloads, logs, traces, or error bodies.
-- API donations begin in quarantine. Creation is idempotent; business rows contain only an encrypted-envelope handle, a short HMAC fingerprint tail, and a hashed revocation capability.
+- API donations are matched against `registry/providers.json`, begin in quarantine, and are automatically verified and scheduled. Every configured model receives a medium run per interval; status reads expose detailed progress, quota accounting, attribution, and sanitized upstream errors.
+- Donation creation is idempotent. Business rows contain only an encrypted-envelope handle, a short HMAC fingerprint tail, and a hashed revocation capability; scheduled runs receive short-lived credential copies.
 - Public conclusions use the three frontend evidence sources: `community`, `donated`, and `vendor`. Vendor samples remain excluded from the headline.
 - `Legacy/` is an audit and migration source. Backend code must not import or execute Legacy modules at runtime.
