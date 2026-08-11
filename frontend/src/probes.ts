@@ -269,6 +269,7 @@ export const FIXED_32K_INPUT_TOKENS = 33792
 /** No measured value exists for short-context requests; this is an estimate. */
 export const SHORT_CONTEXT_INPUT_TOKENS = 320
 export const OUTPUT_TOKENS_PER_REQUEST = 40
+export const MAX_OUTPUT_TOKENS_PER_ATTEMPT = 2048
 
 function profileKeys(config: RunConfig): string[] {
   return config.formats.flatMap((format) =>

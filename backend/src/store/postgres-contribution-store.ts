@@ -7,6 +7,9 @@ import type { ContributionStore, DonationRecord, RegistryProposalRecord } from '
 
 interface DonationRow {
   id: string
+  quote_id: string
+  request_digest: string
+  idempotency_key: string
   kind: 'api'
   status: DonationStatus
   target_origin: string
@@ -36,14 +39,15 @@ interface ProposalRow {
   created_at: Date
 }
 
-const donationColumns = `id,kind,status,target_origin,target_base_url,target_hostname,constraints,credential_handle,
+const donationColumns = `id,quote_id,request_digest,idempotency_key,kind,status,target_origin,target_base_url,target_hostname,constraints,credential_handle,
   credential_fingerprint_tail,revocation_token_hash,disclosure_version,created_at,expires_at,revoked_at`
 const proposalColumns = `id,probe_id,field_name,current_value,proposed_value,reason,evidence_urls,
   content_sha256,status,issue_url,created_at`
 
 function mapDonation(row: DonationRow): DonationRecord {
   return {
-    id: row.id, kind: row.kind, status: row.status, targetOrigin: row.target_origin, targetBaseUrl: row.target_base_url,
+    id: row.id, quoteId: row.quote_id, requestDigest: row.request_digest, idempotencyKey: row.idempotency_key,
+    kind: row.kind, status: row.status, targetOrigin: row.target_origin, targetBaseUrl: row.target_base_url,
     targetHostname: row.target_hostname, constraints: row.constraints, credentialHandle: row.credential_handle,
     credentialFingerprintTail: row.credential_fingerprint_tail, revocationTokenHash: row.revocation_token_hash,
     disclosureVersion: row.disclosure_version, createdAt: row.created_at.toISOString(),
@@ -84,24 +88,41 @@ async function appendAudit(
 export class PostgresContributionStore implements ContributionStore {
   constructor(private readonly pool: DatabasePool) {}
 
-  async createDonation(record: DonationRecord): Promise<void> {
+  async createDonation(record: DonationRecord): Promise<{ record: DonationRecord; created: boolean }> {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
-      await client.query(
+      const inserted = await client.query<DonationRow>(
         `INSERT INTO donations
-         (id,kind,status,target_origin,target_base_url,target_hostname,constraints,credential_handle,credential_fingerprint_tail,
-          revocation_token_hash,disclosure_version,created_at,expires_at,revoked_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-        [record.id, record.kind, record.status, record.targetOrigin, record.targetBaseUrl, record.targetHostname, record.constraints,
+         (id,quote_id,request_digest,idempotency_key,kind,status,target_origin,target_base_url,target_hostname,constraints,
+          credential_handle,credential_fingerprint_tail,revocation_token_hash,disclosure_version,created_at,expires_at,revoked_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+         ON CONFLICT (idempotency_key) DO NOTHING RETURNING ${donationColumns}`,
+        [record.id, record.quoteId, record.requestDigest, record.idempotencyKey, record.kind, record.status,
+          record.targetOrigin, record.targetBaseUrl, record.targetHostname, record.constraints,
           record.credentialHandle, record.credentialFingerprintTail, record.revocationTokenHash,
           record.disclosureVersion, record.createdAt, record.expiresAt, record.revokedAt],
       )
-      await appendAudit(client, 'donation.created', 'donation', record.id, {
-        kind: record.kind, status: record.status, target_hostname: record.targetHostname,
-        credential_fingerprint_tail: record.credentialFingerprintTail,
-      })
+      let output = inserted.rows[0]
+      let created = true
+      if (!output) {
+        const existing = await client.query<DonationRow>(
+          `SELECT ${donationColumns} FROM donations WHERE idempotency_key=$1`,
+          [record.idempotencyKey],
+        )
+        output = existing.rows[0]
+        created = false
+        if (!output || output.request_digest !== record.requestDigest) {
+          throw new AppError(409, 'idempotency_conflict', 'The idempotency key was already used for a different request.')
+        }
+      } else {
+        await appendAudit(client, 'donation.created', 'donation', record.id, {
+          kind: record.kind, status: record.status, target_hostname: record.targetHostname,
+          credential_fingerprint_tail: record.credentialFingerprintTail,
+        })
+      }
       await client.query('COMMIT')
+      return { record: mapDonation(output), created }
     } catch (error) {
       await client.query('ROLLBACK')
       throw error

@@ -1,5 +1,6 @@
 import https from 'node:https'
 import type { LookupFunction } from 'node:net'
+import { MAX_OUTPUT_TOKENS } from '../domain/run-limits.js'
 import { AppError } from '../errors.js'
 import { resolvePublicTarget } from './ssrf.js'
 
@@ -13,6 +14,7 @@ export interface TransportRequest {
   messages: { role: 'developer' | 'user'; content: string }[]
   effort: string
   cacheKey: string
+  signal?: AbortSignal
 }
 
 export interface TransportResult {
@@ -99,6 +101,7 @@ export async function sendNormalRequest(input: TransportRequest): Promise<Transp
     include: ['reasoning.encrypted_content'],
     store: false,
     stream: true,
+    max_output_tokens: MAX_OUTPUT_TOKENS,
     prompt_cache_key: input.cacheKey,
   })
   const started = Date.now()
@@ -125,7 +128,9 @@ export async function sendNormalRequest(input: TransportRequest): Promise<Transp
         lookup,
         agent: false,
         rejectUnauthorized: true,
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: input.signal
+          ? AbortSignal.any([input.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+          : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       },
       (response) => {
         const statusCode = response.statusCode ?? 0

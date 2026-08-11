@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { isIP } from 'node:net'
 
 export type AppEnvironment = 'development' | 'test' | 'production'
 
@@ -18,6 +19,7 @@ export interface AppConfig {
   maxRunRequests: number
   scoringReleaseId: string
   repositoryUrl: string
+  trustProxy: false | string | string[] | number
 }
 
 function parseEnvironment(value: string | undefined): AppEnvironment {
@@ -65,6 +67,30 @@ function repositoryUrl(value: string | undefined): string {
   return `${url.origin}/${parts.join('/')}`
 }
 
+function validTrustedAddress(item: string): boolean {
+  const [address, prefix, extra] = item.split('/')
+  const family = isIP(address ?? '')
+  if (!family || extra != null) return false
+  if (prefix == null) return true
+  if (!/^\d+$/.test(prefix)) return false
+  const bits = Number(prefix)
+  return bits >= 0 && bits <= (family === 4 ? 32 : 128)
+}
+
+function trustProxy(value: string | undefined): AppConfig['trustProxy'] {
+  if (!value) return false
+  if (/^\d+$/.test(value)) {
+    const hops = Number(value)
+    if (hops < 1 || hops > 10) throw new Error('TRUST_PROXY hop count must be between 1 and 10')
+    return hops
+  }
+  const addresses = value.split(',').map((item) => item.trim()).filter(Boolean)
+  if (!addresses.length || addresses.some((item) => !validTrustedAddress(item))) {
+    throw new Error('TRUST_PROXY must contain IP/CIDR values or a trusted hop count')
+  }
+  return addresses.length === 1 ? addresses[0]! : addresses
+}
+
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
   const appEnv = parseEnvironment(environment['APP_ENV'] ?? environment['NODE_ENV'])
   const publicOrigin = environment['PUBLIC_ORIGIN'] ?? 'http://localhost:5173'
@@ -89,5 +115,6 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     maxRunRequests: 500,
     scoringReleaseId: environment['SCORING_RELEASE_ID'] ?? 'stage-c-trusted-likelihood-v2',
     repositoryUrl: repositoryUrl(environment['REPOSITORY_URL']),
+    trustProxy: trustProxy(environment['TRUST_PROXY']),
   }
 }

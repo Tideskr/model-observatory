@@ -11,6 +11,10 @@ import type {
 
 type JsonObject = Record<string, unknown>
 
+const TRUSTED_CATALOG_SOURCE_SHA256 = '8cf89f903d467cc5fb0c461ec5154347fcb59e5aac6b036e79cf9bdd8b204eb8'
+const TRUSTED_BASELINE_SOURCE_SHA256 = 'a1de0b4cce26a6df3dfc59907a7b5043460f9cde3614d38d0919e98fd4ba2100'
+const TRUSTED_BASELINE_CONTENT_SHA256 = 'dd692466ea601d99b737edae66a35941f236d5e7426244f2c04e43f314f43851'
+
 const signatureValues: Record<string, Record<string, string>> = {
   'gpt-5.6-sol': { low: '8', medium: '16', high: '40', xhigh: '128', max: '960' },
   'gpt-5.6-terra': { low: '12', medium: '16', high: '32', xhigh: '84', max: '960' },
@@ -32,6 +36,10 @@ function text(value: unknown, label: string): string {
 
 function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex')
+}
+
+function trustedSourceHash(value: string): string {
+  return sha256(value.replace(/\r\n/g, '\n'))
 }
 
 function parseJson(raw: string, label: string): JsonObject {
@@ -59,13 +67,16 @@ function buildProbes(catalog: JsonObject, baseline: JsonObject): ScoringProbeSee
     promptHash(prompt, hash, probeId)
     if (baselineValue['user_prompt_sha256'] !== hash) throw new Error(`${probeId} differs between catalog and baseline`)
     const normalizer = object(baselineValue['normalizer'], `${probeId}.normalizer`)
+    const developerPrompt = String(baselineValue['developer_prompt'] ?? '')
+    const developerPromptSha256 = text(baselineValue['developer_prompt_sha256'], `${probeId}.developer_prompt_sha256`)
+    promptHash(developerPrompt, developerPromptSha256, `${probeId} developer`)
     result.push({
       probeId,
       category: 'distribution',
       prompt,
       promptSha256: hash,
-      developerPrompt: String(baselineValue['developer_prompt'] ?? ''),
-      developerPromptSha256: text(baselineValue['developer_prompt_sha256'], `${probeId}.developer_prompt_sha256`),
+      developerPrompt,
+      developerPromptSha256,
       normalizerId: text(normalizer['id'], `${probeId}.normalizer.id`),
       normalizer,
       scoringKind: text(value['scoring_kind'], `${probeId}.scoring_kind`),
@@ -189,6 +200,9 @@ function buildCells(baseline: JsonObject): ScoringCellSeed[] {
 function buildCalibrations(baseline: JsonObject): ScoringCalibrationSeed[] {
   return Object.entries(object(baseline['calibrations'], 'calibrations')).map(([signature, rawValue]) => {
     const value = object(rawValue, `calibrations.${signature}`)
+    if (text(value['runtime_signature'], `${signature}.runtime_signature`) !== signature) {
+      throw new Error(`${signature} calibration runtime signature mismatch`)
+    }
     const thresholds = {
       tau: value['tau'],
       pass_margin: value['pass_margin'],
@@ -217,10 +231,13 @@ export async function importLegacyScoringRelease(
     readFile(catalogPath, 'utf8'),
     readFile(baselinePath, 'utf8'),
   ])
+  if (trustedSourceHash(catalogRaw) !== TRUSTED_CATALOG_SOURCE_SHA256) throw new Error('Legacy runtime catalog source hash mismatch')
+  if (trustedSourceHash(baselineRaw) !== TRUSTED_BASELINE_SOURCE_SHA256) throw new Error('Legacy baseline source hash mismatch')
   const catalog = parseJson(catalogRaw, 'runtime catalog')
   const baseline = parseJson(baselineRaw, 'trusted likelihood baseline')
   if (catalog['schema_version'] !== 1) throw new Error('unsupported Legacy catalog schema')
   if (baseline['schema_version'] !== 2) throw new Error('unsupported Legacy baseline schema')
+  if (baseline['content_sha256'] !== TRUSTED_BASELINE_CONTENT_SHA256) throw new Error('Legacy baseline content hash mismatch')
   const models = Array.isArray(baseline['models']) ? baseline['models'].map(String) : []
   if (models.join(',') !== 'gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna') {
     throw new Error('unexpected target model set in Legacy baseline')

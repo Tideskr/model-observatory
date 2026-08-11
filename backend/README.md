@@ -31,10 +31,14 @@ npm run worker
 
 The importer validates both Legacy JSON documents, all pinned prompt hashes, the cross-file release identity, and the baseline content hash before inserting 11 probes, 15 templates, 27 signatures, 12 fitted cells, 4 calibrations, and 6 ordered verdict rules.
 
+When a reverse proxy terminates client connections, set `TRUST_PROXY` to its IP/CIDR (comma-separated for multiple proxies) or a bounded trusted hop count. Leaving it empty is the secure direct-connection default; do not enable forwarded headers globally.
+
 ## Security boundary
 
 - Remote execution initially supports Normal requests only. Native requests remain local until isolated ephemeral executors are audited.
+- Quotes include retries in their maximum attempt/token/cost bounds. Workers reserve every attempt durably; estimates assume 40 visible output tokens while the transport enforces a 2,048-token hard ceiling that includes reasoning tokens.
+- Worker state changes are fenced by a monotonically increasing lease version. Sanitized observations are checkpointed per job so recovery skips completed work.
 - Credentials must never enter normal run rows, queue payloads, logs, traces, or error bodies.
-- API donations begin in quarantine. Business rows contain only an encrypted-envelope handle, a short HMAC fingerprint tail, and a hashed revocation capability.
+- API donations begin in quarantine. Creation is idempotent; business rows contain only an encrypted-envelope handle, a short HMAC fingerprint tail, and a hashed revocation capability.
 - Public conclusions use the three frontend evidence sources: `community`, `donated`, and `vendor`. Vendor samples remain excluded from the headline.
 - `Legacy/` is an audit and migration source. Backend code must not import or execute Legacy modules at runtime.

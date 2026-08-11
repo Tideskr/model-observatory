@@ -48,14 +48,17 @@ test('API donation is quarantined, capability-protected, and destroys its creden
   })
 
   const secret = 'donated-secret-that-must-not-leak'
+  const createHeaders = { 'idempotency-key': 'donation-test-idempotency-0001' }
+  const createPayload = {
+    quote_token: quoteResponse.json().quote_token,
+    api_key: secret,
+    consent: { disclosure_version: DONATION_DISCLOSURE_VERSION, accepted_at: new Date().toISOString() },
+  }
   const createResponse = await app.inject({
     method: 'POST',
     url: '/api/v1/donations',
-    payload: {
-      quote_token: quoteResponse.json().quote_token,
-      api_key: secret,
-      consent: { disclosure_version: DONATION_DISCLOSURE_VERSION, accepted_at: new Date().toISOString() },
-    },
+    headers: createHeaders,
+    payload: createPayload,
   })
   assert.equal(createResponse.statusCode, 202)
   const created = createResponse.json()
@@ -65,6 +68,19 @@ test('API donation is quarantined, capability-protected, and destroys its creden
   assert.ok(record)
   assert.equal(JSON.stringify(record).includes(secret), false)
   assert.equal(await services.credentialVault.read(record.credentialHandle), secret)
+
+  const replay = await app.inject({ method: 'POST', url: '/api/v1/donations', headers: createHeaders, payload: createPayload })
+  assert.equal(replay.statusCode, 202)
+  assert.equal(replay.json().donation_id, created.donation_id)
+  assert.equal(replay.json().revocation_token, created.revocation_token)
+  assert.equal(await services.credentialVault.read(record.credentialHandle), secret)
+
+  const conflict = await app.inject({
+    method: 'POST', url: '/api/v1/donations', headers: createHeaders,
+    payload: { ...createPayload, api_key: 'different-secret' },
+  })
+  assert.equal(conflict.statusCode, 409)
+  assert.equal(conflict.json().code, 'idempotency_conflict')
 
   const hidden = await app.inject({ method: 'GET', url: created.status_url, headers: { authorization: 'Bearer invalid-invalid-invalid-invalid-invalid' } })
   assert.equal(hidden.statusCode, 404)

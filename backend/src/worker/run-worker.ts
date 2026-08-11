@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto'
 import type { AppServices } from '../services.js'
 import { buildRunJobs, type ProbeJob } from '../executor/job-plan.js'
 import { sendNormalRequest, TransportError, type TransportResult } from '../executor/normal-transport.js'
-import { scoreRun, type RawObservation } from '../scoring/score.js'
+import { scoreObservation, scoreStoredRun, type RawObservation } from '../scoring/score.js'
 import type { ScoringReleaseSeed } from '../scoring/types.js'
-import type { RunRecord, RunReport } from '../store/run-store.js'
+import { LeaseLostError, type RunLease, type RunRecord, type RunReport, type StoredObservation } from '../store/run-store.js'
 
 type Transport = (input: {
-  baseUrl: string; apiKey: string; model: string; messages: ProbeJob['messages']; effort: string; cacheKey: string
+  baseUrl: string; apiKey: string; model: string; messages: ProbeJob['messages']; effort: string; cacheKey: string;
+  signal?: AbortSignal
 }) => Promise<TransportResult>
 
 export interface RunWorkerOptions {
@@ -49,20 +50,33 @@ export class RunWorker {
 
   async #execute(run: RunRecord): Promise<void> {
     let apiKey = ''
-    const heartbeat = setInterval(() => {
-      void this.#services.runStore.renewLease(run.id, this.#workerId, this.#leaseSeconds)
-    }, Math.max(5_000, this.#leaseSeconds * 500))
+    let cleanupCredential = false
+    let renewing = false
+    const lease: RunLease = { workerId: this.#workerId, version: run.leaseVersion }
+    const controller = new AbortController()
+    const renew = async () => {
+      if (renewing || controller.signal.aborted) return
+      renewing = true
+      try {
+        if (!await this.#services.runStore.renewLease(run.id, lease, this.#leaseSeconds)) controller.abort(new LeaseLostError())
+      } catch (error) {
+        controller.abort(error)
+      } finally {
+        renewing = false
+      }
+    }
+    const heartbeat = setInterval(() => void renew(), Math.max(1_000, this.#leaseSeconds * 250))
     heartbeat.unref()
     try {
       const seed = await this.#loadScoring(run.scoringReleaseId)
       apiKey = await this.#services.credentialVault.read(run.credentialHandle)
       const jobs = buildRunJobs(run, seed)
-      await this.#services.runStore.transition(run.id, 'running', 'started', { total_requests: jobs.length })
-      const rows = await this.#executeJobs(run, jobs, apiKey)
-      const latest = await this.#services.runStore.get(run.id)
-      if (!latest || latest.status === 'cancelled' || latest.status === 'deleted') return
-      await this.#services.runStore.transition(run.id, 'scoring', 'scoring', { completed_requests: rows.length })
-      const scored = scoreRun(run, rows, seed)
+      await this.#ensureLease(run.id, lease, controller)
+      await this.#services.runStore.transition(run.id, 'running', 'started', { total_requests: jobs.length }, lease)
+      const rows = await this.#executeJobs(run, jobs, apiKey, seed, lease, controller)
+      await this.#ensureLease(run.id, lease, controller)
+      await this.#services.runStore.transition(run.id, 'scoring', 'scoring', { completed_requests: rows.length }, lease)
+      const scored = scoreStoredRun(run, rows, seed)
       const report: RunReport = {
         runId: run.id,
         status: scored.status,
@@ -73,8 +87,10 @@ export class RunWorker {
         observations: scored.observations,
         createdAt: new Date().toISOString(),
       }
-      await this.#services.runStore.finalize(run.id, scored.status, scored.storedObservations, report)
+      await this.#services.runStore.finalize(run.id, scored.status, scored.storedObservations, report, lease)
+      cleanupCredential = true
     } catch (error) {
+      if (error instanceof LeaseLostError || controller.signal.reason instanceof LeaseLostError) return
       const latest = await this.#services.runStore.get(run.id)
       if (latest && !['cancelled', 'deleted', 'completed', 'failed', 'incomplete'].includes(latest.status)) {
         const safeError = error instanceof TransportError ? error.category : 'worker_execution_failed'
@@ -89,42 +105,74 @@ export class RunWorker {
           createdAt: new Date().toISOString(),
         }
         if (latest.status === 'provisioning' || latest.status === 'running' || latest.status === 'scoring') {
-          await this.#services.runStore.finalize(run.id, 'failed', [], report)
+          try {
+            await this.#services.runStore.finalize(run.id, 'failed', [], report, lease)
+            cleanupCredential = true
+          } catch (finalizeError) {
+            if (!(finalizeError instanceof LeaseLostError)) throw finalizeError
+          }
         }
       }
     } finally {
       clearInterval(heartbeat)
       apiKey = ''
-      await this.#services.credentialVault.delete(run.credentialHandle)
+      if (cleanupCredential) await this.#services.credentialVault.delete(run.credentialHandle)
     }
   }
 
-  async #executeJobs(run: RunRecord, jobs: ProbeJob[], apiKey: string): Promise<RawObservation[]> {
-    const results: (RawObservation | undefined)[] = Array.from({ length: jobs.length })
+  async #ensureLease(runId: string, lease: RunLease, controller: AbortController): Promise<void> {
+    if (controller.signal.aborted || !await this.#services.runStore.renewLease(runId, lease, this.#leaseSeconds)) {
+      controller.abort(new LeaseLostError())
+      throw new LeaseLostError()
+    }
+  }
+
+  async #executeJobs(
+    run: RunRecord,
+    jobs: ProbeJob[],
+    apiKey: string,
+    seed: ScoringReleaseSeed,
+    lease: RunLease,
+    controller: AbortController,
+  ): Promise<StoredObservation[]> {
+    const plannedJobIds = new Set(jobs.map((job) => job.jobId))
+    const existing = (await this.#services.runStore.listObservations(run.id))
+      .filter((item) => plannedJobIds.has(item.jobId))
+    const completedJobs = new Set(existing.map((item) => item.jobId))
     let cursor = 0
-    let completed = 0
+    let completed = completedJobs.size
     const execute = async () => {
       for (;;) {
         const index = cursor
         cursor += 1
         const job = jobs[index]
         if (!job) return
-        const latest = await this.#services.runStore.get(run.id)
-        if (!latest || latest.status === 'cancelled' || latest.status === 'deleted') {
-          results[index] = { job, status: 'cancelled' }
-          continue
-        }
-        results[index] = await this.#executeJob(run, job, apiKey)
+        if (completedJobs.has(job.jobId)) continue
+        const raw = await this.#executeJob(run, job, apiKey, lease, controller)
+        const observation = scoreObservation(run, raw, seed)
+        await this.#services.runStore.saveObservations(run.id, [observation], lease)
+        completedJobs.add(job.jobId)
         completed += 1
-        await this.#services.runStore.appendEvent(run.id, 'progress', { completed, total: jobs.length })
+        await this.#services.runStore.appendEvent(run.id, 'progress', { completed, total: jobs.length }, lease)
       }
     }
     await Promise.all(Array.from({ length: Math.min(run.config.workers, jobs.length) }, execute))
-    return results.filter((item): item is RawObservation => item != null)
+    const observations = await this.#services.runStore.listObservations(run.id)
+    const byJob = new Map(observations.map((item) => [item.jobId, item]))
+    return jobs.map((job) => byJob.get(job.jobId)).filter((item): item is StoredObservation => item != null)
   }
 
-  async #executeJob(run: RunRecord, job: ProbeJob, apiKey: string): Promise<RawObservation> {
+  async #executeJob(
+    run: RunRecord,
+    job: ProbeJob,
+    apiKey: string,
+    lease: RunLease,
+    controller: AbortController,
+  ): Promise<RawObservation> {
     for (let attempt = 0; attempt <= run.config.retries; attempt += 1) {
+      await this.#ensureLease(run.id, lease, controller)
+      const reserved = await this.#services.runStore.reserveAttempt(run.id, job.jobId, run.config.retries + 1, lease)
+      if (!reserved) return { job, status: 'error', safeError: 'attempt_budget_exhausted' }
       try {
         const result = await this.#transport({
           baseUrl: run.targetBaseUrl,
@@ -133,9 +181,11 @@ export class RunWorker {
           messages: job.messages,
           effort: job.effort,
           cacheKey: job.cacheKey,
+          signal: controller.signal,
         })
         return { job, status: 'ok', answer: result.answer, elapsedMs: result.elapsedMs }
       } catch (error) {
+        if (controller.signal.aborted) throw new LeaseLostError()
         const transport = error instanceof TransportError ? error : new TransportError('connection_or_tls_error', true)
         if (!transport.retryable || attempt === run.config.retries) {
           return { job, status: 'error', safeError: transport.category }

@@ -1,3 +1,5 @@
+import { apiUrl } from '../config'
+
 const API_PREFIX = '/api/v1'
 export const DONATION_DISCLOSURE_VERSION = 'donation-api-v1' as const
 
@@ -20,33 +22,45 @@ export interface DonationReceipt {
   expires_at: string
 }
 
+export interface PreparedDonationSubmission {
+  quoteToken: string
+}
+
 export async function submitApiDonation(input: {
   baseUrl: string
   apiKey: string
   quotaUsd: number
   intervalMinutes: number
+  idempotencyKey: string
+  prepared?: PreparedDonationSubmission
+  onPrepared?: (prepared: PreparedDonationSubmission) => void
   signal?: AbortSignal
 }): Promise<DonationReceipt> {
-  const quote = await json<{ quote_token: string }>(await fetch(`${API_PREFIX}/donations/quote`, {
+  let prepared = input.prepared
+  if (!prepared) {
+    const quote = await json<{ quote_token: string }>(await fetch(apiUrl(`${API_PREFIX}/donations/quote`), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'api',
+        base_url: input.baseUrl,
+        constraints: {
+          quota_usd: input.quotaUsd,
+          concurrency: 2,
+          interval_minutes: input.intervalMinutes,
+          expires_in_days: 30,
+        },
+      }),
+      signal: input.signal,
+    }))
+    prepared = { quoteToken: quote.quote_token }
+    input.onPrepared?.(prepared)
+  }
+  return json<DonationReceipt>(await fetch(apiUrl(`${API_PREFIX}/donations`), {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'idempotency-key': input.idempotencyKey },
     body: JSON.stringify({
-      kind: 'api',
-      base_url: input.baseUrl,
-      constraints: {
-        quota_usd: input.quotaUsd,
-        concurrency: 2,
-        interval_minutes: input.intervalMinutes,
-        expires_in_days: 30,
-      },
-    }),
-    signal: input.signal,
-  }))
-  return json<DonationReceipt>(await fetch(`${API_PREFIX}/donations`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      quote_token: quote.quote_token,
+      quote_token: prepared.quoteToken,
       api_key: input.apiKey,
       consent: { disclosure_version: DONATION_DISCLOSURE_VERSION, accepted_at: new Date().toISOString() },
     }),
@@ -69,7 +83,7 @@ export async function createRegistryProposal(input: {
   proposedValue: string
   reason: string
 }): Promise<RegistryProposalReceipt> {
-  return json<RegistryProposalReceipt>(await fetch(`${API_PREFIX}/registry/proposals`, {
+  return json<RegistryProposalReceipt>(await fetch(apiUrl(`${API_PREFIX}/registry/proposals`), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({

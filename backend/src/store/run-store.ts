@@ -18,6 +18,19 @@ export interface RunRecord {
   credentialHandle: string
   createdAt: string
   expiresAt: string
+  leaseVersion: number
+}
+
+export interface RunLease {
+  workerId: string
+  version: number
+}
+
+export class LeaseLostError extends Error {
+  constructor() {
+    super('The worker no longer owns the run lease.')
+    this.name = 'LeaseLostError'
+  }
 }
 
 export interface RunEvent {
@@ -55,13 +68,15 @@ export interface StoredObservation {
 export interface RunStore {
   create(record: RunRecord): Promise<{ record: RunRecord; created: boolean }>
   get(runId: string): Promise<RunRecord | null>
-  transition(runId: string, status: RunStatus, eventType: string, payload?: Record<string, unknown>): Promise<RunRecord>
+  transition(runId: string, status: RunStatus, eventType: string, payload?: Record<string, unknown>, lease?: RunLease): Promise<RunRecord>
   listEvents(runId: string, afterId: string): Promise<RunEvent[]>
-  appendEvent(runId: string, eventType: string, payload: Record<string, unknown>): Promise<void>
+  appendEvent(runId: string, eventType: string, payload: Record<string, unknown>, lease?: RunLease): Promise<void>
   claimNext(workerId: string, leaseSeconds: number): Promise<RunRecord | null>
-  renewLease(runId: string, workerId: string, leaseSeconds: number): Promise<boolean>
-  saveObservations(runId: string, observations: StoredObservation[]): Promise<void>
-  finalize(runId: string, status: Extract<RunStatus, 'completed' | 'incomplete' | 'failed'>, observations: StoredObservation[], report: RunReport): Promise<RunRecord>
+  renewLease(runId: string, lease: RunLease, leaseSeconds: number): Promise<boolean>
+  reserveAttempt(runId: string, jobId: string, maximumAttempts: number, lease: RunLease): Promise<boolean>
+  saveObservations(runId: string, observations: StoredObservation[], lease?: RunLease): Promise<void>
+  listObservations(runId: string): Promise<StoredObservation[]>
+  finalize(runId: string, status: Extract<RunStatus, 'completed' | 'incomplete' | 'failed'>, observations: StoredObservation[], report: RunReport, lease: RunLease): Promise<RunRecord>
   saveReport(report: RunReport): Promise<void>
   getReport(runId: string): Promise<RunReport | null>
   purge(runId: string): Promise<void>

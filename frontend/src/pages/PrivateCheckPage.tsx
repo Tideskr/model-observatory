@@ -1,12 +1,22 @@
-import { CheckCircle2, Download, Eye, EyeOff, KeyRound, Loader2, Play, RefreshCw } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { CheckCircle2, CircleStop, Download, Eye, EyeOff, KeyRound, Loader2, Play, RefreshCw } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { RUNNER_DOWNLOAD_URL } from '../config'
+import { API_ORIGIN, LOCAL_RUNNER_ORIGIN, RUNNER_DOWNLOAD_URL } from '../config'
+import {
+  cancelPrivateRun,
+  createPrivateRun,
+  getPrivateRunReport,
+  waitForPrivateRun,
+  type PrivateRunHandle,
+  type PrivateRunReport,
+  type PrivateRunStatus,
+  type PreparedPrivateRunSubmission,
+} from '../api/privateRuns'
 import { detectLocalRunner, supportsNativeFormat } from '../lib/localRunner'
 import type { RunnerState } from '../lib/localRunner'
 import { estimateRun, presets } from '../probes'
 import type { RunConfig } from '../probes'
-import { DEFAULT_MULTIPLIER, DEFAULT_PRICE } from '../pricing'
+import { DEFAULT_MULTIPLIER, DEFAULT_PRICE, estimateMaximumRunCost } from '../pricing'
 import type { PriceAssumption } from '../pricing'
 import { ProbeSelector } from '../components/ProbeSelector'
 import { RunEstimate } from '../components/RunEstimate'
@@ -21,6 +31,14 @@ import {
   DialogTitle,
 } from '../components/ui-kit/dialog'
 
+interface ActiveRun {
+  handle: PrivateRunHandle
+  status: PrivateRunStatus
+  completed: number
+  total: number
+  report: PrivateRunReport | null
+}
+
 export function PrivateCheckPage() {
   const [runner, setRunner] = useState<RunnerState>({ status: 'checking' })
   const [baseUrl, setBaseUrl] = useState('https://api.example.com/v1')
@@ -32,6 +50,14 @@ export function PrivateCheckPage() {
   const [multiplier, setMultiplier] = useState(DEFAULT_MULTIPLIER)
   const [remoteDialogOpen, setRemoteDialogOpen] = useState(false)
   const [remoteConsent, setRemoteConsent] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)
+  const runController = useRef<AbortController | null>(null)
+  const pendingSubmission = useRef<{
+    fingerprint: string
+    idempotencyKey: string
+    prepared?: PreparedPrivateRunSubmission
+  } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -42,6 +68,8 @@ export function PrivateCheckPage() {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => () => runController.current?.abort(), [])
 
   const nativeAvailable = supportsNativeFormat(runner)
   const remote = runner.status === 'remote'
@@ -61,24 +89,87 @@ export function PrivateCheckPage() {
     setRunner({ status: 'remote' })
     setRemoteDialogOpen(false)
     setRemoteConsent(false)
-    // Native replay cannot run remotely; drop it rather than silently failing.
+    // Remote execution supports only the Normal/no-history evidence profile.
     setConfig((current) => ({
       ...current,
-      formats: current.formats.filter((format) => format !== 'native_codex').length
-        ? current.formats.filter((format) => format !== 'native_codex')
-        : ['normal'],
+      formats: ['normal'],
+      contexts: ['no_history'],
     }))
     toast.warning('已切换到项目服务器代理', {
       description: 'API key 将随请求发送到项目服务器。Native Codex 格式不可用。',
     })
   }
 
-  function startRun() {
+  async function startRun() {
     if (!ready) return
     const estimate = estimateRun(config)
-    toast.info('这是交互原型，未发出任何请求', {
-      description: `将执行 ${estimate.requests} 个请求，单次检测，不做持续监控。`,
+    const maximumBudgetUsd = estimateMaximumRunCost(estimate, config.retries, price, multiplier)
+    const controller = new AbortController()
+    const apiOrigin = runner.status === 'present' ? LOCAL_RUNNER_ORIGIN : API_ORIGIN
+    const fingerprint = JSON.stringify({
+      apiOrigin, baseUrl: baseUrl.trim(), model: model.trim(), apiKey, config,
+      maximumBudgetUsd, price, multiplier,
     })
+    if (pendingSubmission.current?.fingerprint !== fingerprint) {
+      pendingSubmission.current = { fingerprint, idempotencyKey: crypto.randomUUID() }
+    }
+    runController.current?.abort()
+    runController.current = controller
+    setSubmitting(true)
+    try {
+      const handle = await createPrivateRun({
+        apiOrigin,
+        baseUrl: baseUrl.trim(),
+        model: model.trim(),
+        apiKey,
+        config,
+        maximumBudgetUsd,
+        price,
+        multiplier,
+        idempotencyKey: pendingSubmission.current.idempotencyKey,
+        prepared: pendingSubmission.current.prepared,
+        onPrepared: (prepared) => {
+          if (pendingSubmission.current?.fingerprint === fingerprint) pendingSubmission.current.prepared = prepared
+        },
+        signal: controller.signal,
+      })
+      pendingSubmission.current = null
+      setApiKey('')
+      setActiveRun({ handle, status: handle.status, completed: 0, total: estimate.requests, report: null })
+      const report = await waitForPrivateRun(handle, (event) => {
+        setActiveRun((current) => {
+          if (!current || current.handle.runId !== handle.runId) return current
+          const status = typeof event.payload['status'] === 'string'
+            ? event.payload['status'] as PrivateRunStatus
+            : current.status
+          const completed = typeof event.payload['completed'] === 'number' ? event.payload['completed'] : current.completed
+          const total = typeof event.payload['total'] === 'number' ? event.payload['total'] : current.total
+          return { ...current, status, completed, total }
+        })
+      }, controller.signal)
+      setActiveRun((current) => current?.handle.runId === handle.runId
+        ? { ...current, status: report.status, completed: current.total, report }
+        : current)
+      toast.success('检测完成')
+    } catch (error) {
+      if (!controller.signal.aborted) toast.error(error instanceof Error ? error.message : '检测启动失败')
+    } finally {
+      if (runController.current === controller) runController.current = null
+      setSubmitting(false)
+    }
+  }
+
+  async function cancelRun() {
+    if (!activeRun) return
+    try {
+      const status = await cancelPrivateRun(activeRun.handle)
+      runController.current?.abort()
+      const report = await getPrivateRunReport(activeRun.handle)
+      setActiveRun((current) => current ? { ...current, status, report } : current)
+      toast.info('检测已取消')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '取消失败')
+    }
   }
 
   return (
@@ -199,12 +290,42 @@ export function PrivateCheckPage() {
           <ProbeSelector config={config} onChange={setConfig} nativeAvailable={nativeAvailable} />
 
           <div className="form-actions">
-            <button type="button" className="btn btn-primary" disabled={!ready} onClick={startRun}>
-              <Play size={16} /> 开始检测
+            <button type="button" className="btn btn-primary" disabled={!ready || submitting} onClick={() => void startRun()}>
+              {submitting ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+              {submitting ? '检测中…' : '开始检测'}
             </button>
+            {activeRun && !activeRun.report && (
+              <button type="button" className="btn" onClick={() => void cancelRun()}>
+                <CircleStop size={16} /> 取消检测
+              </button>
+            )}
             {!canRun && <span>需要本机执行器，或显式改用项目服务器代理。</span>}
             {canRun && !config.probes.length && <span>请至少选择一个检测项。</span>}
           </div>
+
+          {activeRun && (
+            <section className="card card-pad" aria-live="polite">
+              <div className="card-head">
+                <div className="card-head-text">
+                  <h2>私有报告</h2>
+                  <p><code>{activeRun.handle.runId}</code></p>
+                </div>
+                <Pill tone={activeRun.report?.status === 'completed' ? 'good' : activeRun.report ? 'warn' : 'info'} size="sm">
+                  {activeRun.status}
+                </Pill>
+              </div>
+              <ul className="estimate-list">
+                <li><span>进度</span><b>{activeRun.completed} / {activeRun.total}</b></li>
+                {activeRun.report && (
+                  <>
+                    <li><span>结论</span><b>{String(activeRun.report.summary['overall_verdict'] ?? '无可用结论')}</b></li>
+                    <li><span>评分版本</span><b>{activeRun.report.scoring_release_id}</b></li>
+                    <li><span>脱敏观测</span><b>{activeRun.report.observations.length}</b></li>
+                  </>
+                )}
+              </ul>
+            </section>
+          )}
         </div>
 
         <RunEstimate

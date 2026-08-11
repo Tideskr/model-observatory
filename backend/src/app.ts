@@ -41,7 +41,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
             },
           },
     bodyLimit: 64 * 1024,
-    trustProxy: false,
+    trustProxy: config.trustProxy,
     genReqId: () => randomUUID(),
   }).withTypeProvider<TypeBoxTypeProvider>()
 

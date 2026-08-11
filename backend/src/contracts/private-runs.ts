@@ -45,9 +45,12 @@ export type RunConfig = Static<typeof RunConfigSchema>
 export const RunEstimateSchema = Type.Object(
   {
     requests: Type.Integer(),
+    maximum_attempts: Type.Integer(),
     long_context_requests: Type.Integer(),
     input_tokens: Type.Integer(),
     output_tokens: Type.Integer(),
+    maximum_input_tokens: Type.Integer(),
+    maximum_output_tokens: Type.Integer(),
     estimated_seconds: Type.Integer(),
     estimated_cost_usd: Type.Number(),
     maximum_cost_usd: Type.Number(),
@@ -62,6 +65,14 @@ export const PrivateRunQuoteRequestSchema = Type.Object(
     model: ScoredModelSchema,
     config: RunConfigSchema,
     maximum_budget_usd: Type.Number({ minimum: 0.01, maximum: 1000 }),
+    pricing: Type.Optional(Type.Object(
+      {
+        input_per_million: Type.Number({ minimum: 0, maximum: 100_000 }),
+        output_per_million: Type.Number({ minimum: 0, maximum: 100_000 }),
+        multiplier: Type.Number({ minimum: 0, maximum: 1000 }),
+      },
+      { additionalProperties: false },
+    )),
   },
   { additionalProperties: false },
 )

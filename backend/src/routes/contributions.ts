@@ -16,7 +16,7 @@ import {
 import { apiMeta } from '../contracts/common.js'
 import { AppError } from '../errors.js'
 import { assertSafeTargetHostname } from '../executor/ssrf.js'
-import { issueCapability, verifyCapability } from '../security/capability.js'
+import { deriveDonationRevocationCapability, verifyCapability } from '../security/capability.js'
 import { issueDonationQuote, verifyDonationQuote } from '../security/donation-quote.js'
 import type { AppServices } from '../services.js'
 import type { DonationRecord, RegistryProposalRecord } from '../store/contribution-store.js'
@@ -26,6 +26,10 @@ interface ContributionRouteOptions { config: AppConfig; services: AppServices }
 const IdParamsSchema = Type.Object({ id: Type.String({ format: 'uuid' }) }, { additionalProperties: false })
 const AuthorizationHeadersSchema = Type.Object(
   { authorization: Type.String({ minLength: 8, maxLength: 512 }) },
+  { additionalProperties: true },
+)
+const CreateHeadersSchema = Type.Object(
+  { 'idempotency-key': Type.String({ minLength: 16, maxLength: 128, pattern: '^[A-Za-z0-9._:-]+$' }) },
   { additionalProperties: true },
 )
 
@@ -65,6 +69,11 @@ async function ownedDonation(id: string, authorization: string, config: AppConfi
 
 function fingerprintTail(apiKey: string, pepper: string): string {
   return createHmac('sha256', pepper).update('model-observatory:credential-fingerprint:').update(apiKey).digest('hex').slice(-10)
+}
+
+function donationRequestDigest(quoteToken: string, apiKey: string, disclosureVersion: string, pepper: string): string {
+  const keyDigest = createHmac('sha256', pepper).update('donation-credential-digest:').update(apiKey).digest('hex')
+  return createHash('sha256').update(quoteToken).update(':').update(keyDigest).update(':').update(disclosureVersion).digest('hex')
 }
 
 function validateEvidenceUrls(values: string[]): void {
@@ -169,7 +178,7 @@ export const contributionRoutes: FastifyPluginAsyncTypebox<ContributionRouteOpti
   app.post(
     '/donations',
     {
-      schema: { tags: ['donations'], body: DonationCreateRequestSchema, response: { 202: DonationCreateResponseSchema } },
+      schema: { tags: ['donations'], headers: CreateHeadersSchema, body: DonationCreateRequestSchema, response: { 202: DonationCreateResponseSchema } },
       config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
     },
     async (request, reply) => {
@@ -179,30 +188,35 @@ export const contributionRoutes: FastifyPluginAsyncTypebox<ContributionRouteOpti
       if (!Number.isFinite(acceptedAt) || acceptedAt > now + 30_000 || acceptedAt < now - 5 * 60_000) {
         throw new AppError(400, 'invalid_consent', 'Consent must be recorded during the current session.')
       }
+      const idempotencyKey = request.headers['idempotency-key']
       const id = randomUUID()
-      const revocation = issueCapability('donation-revocation', config.tokenPepper)
+      const revocation = deriveDonationRevocationCapability(id, idempotencyKey, config.tokenPepper)
       const expiresAt = new Date(now + quote.constraints.expires_in_days * 24 * 60 * 60 * 1000)
       const credentialHandle = await services.credentialVault.put(request.body.api_key, `donation:${id}`, expiresAt)
       const record: DonationRecord = {
-        id, kind: 'api', status: 'quarantined', targetOrigin: quote.targetOrigin, targetBaseUrl: quote.targetBaseUrl,
+        id, quoteId: quote.quoteId,
+        requestDigest: donationRequestDigest(request.body.quote_token, request.body.api_key, request.body.consent.disclosure_version, config.tokenPepper),
+        idempotencyKey, kind: 'api', status: 'quarantined', targetOrigin: quote.targetOrigin, targetBaseUrl: quote.targetBaseUrl,
         targetHostname: quote.targetHostname, constraints: quote.constraints, credentialHandle,
         credentialFingerprintTail: fingerprintTail(request.body.api_key, config.tokenPepper),
         revocationTokenHash: revocation.hash, disclosureVersion: quote.disclosureVersion,
         createdAt: new Date(now).toISOString(), expiresAt: expiresAt.toISOString(), revokedAt: null,
       }
       try {
-        await services.contributionStore.createDonation(record)
+        const result = await services.contributionStore.createDonation(record)
+        if (!result.created) await services.credentialVault.delete(credentialHandle)
+        request.body.api_key = ''
+        const owner = deriveDonationRevocationCapability(result.record.id, idempotencyKey, config.tokenPepper)
+        void reply.status(202)
+        return {
+          ...apiMeta(), donation_id: result.record.id, status: result.record.status,
+          credential_fingerprint_tail: result.record.credentialFingerprintTail,
+          revocation_token: owner.token, revocation_token_tail: owner.tail,
+          status_url: `/api/v1/donations/${result.record.id}/status`, expires_at: result.record.expiresAt,
+        }
       } catch (error) {
         await services.credentialVault.delete(credentialHandle)
         throw error
-      }
-      request.body.api_key = ''
-      void reply.status(202)
-      return {
-        ...apiMeta(), donation_id: record.id, status: record.status,
-        credential_fingerprint_tail: record.credentialFingerprintTail,
-        revocation_token: revocation.token, revocation_token_tail: revocation.tail,
-        status_url: `/api/v1/donations/${record.id}/status`, expires_at: record.expiresAt,
       }
     },
   )

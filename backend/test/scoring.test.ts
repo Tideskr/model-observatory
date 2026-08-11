@@ -26,7 +26,7 @@ test('medium preset uses the exact Legacy calibration and produces a formal prob
     },
     disclosureVersion: 'remote-normal-v1', scoringReleaseId: seed.id, ownerTokenHash: 'a'.repeat(64),
     idempotencyKey: 'medium-scoring-test-key', credentialHandle: randomUUID(),
-    createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString(), leaseVersion: 0,
   }
   const jobs = buildRunJobs(run, seed)
   const categoryAnswers = new Map<string, string[]>()

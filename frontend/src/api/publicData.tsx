@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { providers as mockProviders } from '../data'
 import type { Provider } from '../data'
 import type { ProbeDefinition } from '../probes'
+import { apiUrl } from '../config'
 
 interface ApiMeta {
   generated_at: string
@@ -38,10 +39,8 @@ interface PublicDataState {
 }
 
 const PublicDataContext = createContext<PublicDataState | null>(null)
-const API_ORIGIN = import.meta.env.VITE_API_ORIGIN ?? ''
-
 async function requestJson<T>(path: string, signal: AbortSignal): Promise<T> {
-  const response = await fetch(`${API_ORIGIN}${path}`, { headers: { accept: 'application/json' }, signal })
+  const response = await fetch(apiUrl(path), { headers: { accept: 'application/json' }, signal })
   if (!response.ok) throw new Error(`API request failed with ${response.status}`)
   return (await response.json()) as T
 }

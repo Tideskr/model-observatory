@@ -94,7 +94,7 @@ export const privateRunRoutes: FastifyPluginAsyncTypebox<PrivateRunRouteOptions>
     },
     async (request) => {
       const target = normalizeTarget(request.body.base_url)
-      const estimate = estimateRun(request.body.config, request.body.maximum_budget_usd, config.maxRunRequests)
+      const estimate = estimateRun(request.body.config, request.body.maximum_budget_usd, config.maxRunRequests, request.body.pricing)
       const { quote, token } = issueQuote(
         {
           targetOrigin: target.origin,
@@ -165,6 +165,7 @@ export const privateRunRoutes: FastifyPluginAsyncTypebox<PrivateRunRouteOptions>
         credentialHandle,
         createdAt: new Date(now).toISOString(),
         expiresAt: expiresAt.toISOString(),
+        leaseVersion: 0,
       }
       let result
       try {
@@ -240,16 +241,26 @@ export const privateRunRoutes: FastifyPluginAsyncTypebox<PrivateRunRouteOptions>
         ? run
         : await services.runStore.transition(run.id, 'cancelled', 'cancelled', { reason: 'user_requested' })
       if (!(await services.runStore.getReport(run.id)) && updated.status === 'cancelled') {
-        await services.runStore.saveReport({
-          runId: run.id,
-          status: 'cancelled',
-          terminal: true,
-          scoringReleaseId: run.scoringReleaseId,
-          target: { origin: run.targetOrigin, model: run.model },
-          summary: { reason: 'user_requested', completed_requests: 0 },
-          observations: [],
-          createdAt: new Date().toISOString(),
-        })
+        const observations = await services.runStore.listObservations(run.id)
+        try {
+          await services.runStore.saveReport({
+            runId: run.id,
+            status: 'cancelled',
+            terminal: true,
+            scoringReleaseId: run.scoringReleaseId,
+            target: { origin: run.targetOrigin, model: run.model },
+            summary: { reason: 'user_requested', completed_requests: observations.length },
+            observations: observations.map((item) => ({
+              job_id: item.jobId, probe_id: item.probeId, profile: item.profile, status: item.status,
+              normalized_value: item.normalizedValue, classification: item.classification,
+              hard_anomaly: item.hardAnomaly, elapsed_ms: item.elapsedMs, safe_error: item.safeError,
+              metadata: item.metadata,
+            })),
+            createdAt: new Date().toISOString(),
+          })
+        } catch (error) {
+          if (!(error instanceof AppError) || error.code !== 'report_exists') throw error
+        }
       }
       await services.credentialVault.delete(run.credentialHandle)
       return { ...apiMeta(), run_id: run.id, status: updated.status }

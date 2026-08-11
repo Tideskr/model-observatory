@@ -1,8 +1,8 @@
 import { Check, CloudCog, Eye, EyeOff, KeyRound, Mail, Network, ShieldAlert } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { RadioGroup } from 'radix-ui'
 import { toast } from 'sonner'
-import { submitApiDonation, type DonationReceipt } from '../api/contributions'
+import { submitApiDonation, type DonationReceipt, type PreparedDonationSubmission } from '../api/contributions'
 import { providers, providerKindLabel } from '../data'
 import { presets, estimateRun } from '../probes'
 import { DEFAULT_PRICE, estimateCost, formatUsd } from '../pricing'
@@ -61,13 +61,28 @@ export function DonatePage() {
   const [consent, setConsent] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [receipt, setReceipt] = useState<DonationReceipt | null>(null)
+  const pendingSubmission = useRef<{
+    fingerprint: string
+    idempotencyKey: string
+    prepared?: PreparedDonationSubmission
+  } | null>(null)
 
   async function submitDonation() {
     setSubmitting(true)
     try {
+      const fingerprint = JSON.stringify({ baseUrl: baseUrl.trim(), apiKey, quota, interval })
+      if (pendingSubmission.current?.fingerprint !== fingerprint) {
+        pendingSubmission.current = { fingerprint, idempotencyKey: crypto.randomUUID() }
+      }
       const created = await submitApiDonation({
         baseUrl: baseUrl.trim(), apiKey, quotaUsd: quota, intervalMinutes: interval,
+        idempotencyKey: pendingSubmission.current.idempotencyKey,
+        prepared: pendingSubmission.current.prepared,
+        onPrepared: (prepared) => {
+          if (pendingSubmission.current?.fingerprint === fingerprint) pendingSubmission.current.prepared = prepared
+        },
       })
+      pendingSubmission.current = null
       setApiKey('')
       setConsent(false)
       setReceipt(created)

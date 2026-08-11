@@ -31,6 +31,20 @@ export function deriveRunOwnerCapability(runId: string, idempotencyKey: string, 
   return { token, hash: hashCapability(token, 'run-owner', pepper), tail: token.slice(-6) }
 }
 
+export function deriveDonationRevocationCapability(
+  donationId: string,
+  idempotencyKey: string,
+  pepper: string,
+): IssuedCapability {
+  const token = createHmac('sha256', pepper)
+    .update('model-observatory:donation-revocation-token:')
+    .update(donationId)
+    .update(':')
+    .update(idempotencyKey)
+    .digest('base64url')
+  return { token, hash: hashCapability(token, 'donation-revocation', pepper), tail: token.slice(-6) }
+}
+
 export function verifyCapability(
   token: string,
   expectedHash: string,

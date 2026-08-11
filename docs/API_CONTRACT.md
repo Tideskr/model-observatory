@@ -12,23 +12,23 @@ API 统一挂载在 `/api/v1`。公开读取带版本元数据与缓存策略；
 
 ## 私有检测
 
-- `POST /api/v1/private-runs/quote`：返回目标、探针数、预算和披露版本。
-- `POST /api/v1/private-runs`：创建任务，凭据放在专用一次性字段，不进入常规任务对象。
+- `POST /api/v1/private-runs/quote`：按提交的价格假设返回目标、逻辑请求数、含重试的最大调用/token/费用和披露版本。
+- `POST /api/v1/private-runs`：要求 `Idempotency-Key`，凭据放在专用一次性字段，不进入常规任务对象。
 - `GET /api/v1/private-runs/{id}/events`：SSE 进度；要求任务所有权令牌。
 - `POST /api/v1/private-runs/{id}/cancel`
 - `GET /api/v1/private-runs/{id}/report`
 - `DELETE /api/v1/private-runs/{id}`
 
-任务和报告不能只凭可枚举 ID 访问。失败、取消、不完整和超时必须是显式终态，不能计为正常检测样本。
+任务和报告不能只凭可枚举 ID 访问。失败、取消、不完整和超时必须是显式终态，不能计为正常检测样本。worker 每次上游调用前持久化占用一次预算，预计可见输出按 40 token、实际执行硬上限为 2,048 token；租约恢复只重做没有脱敏观测的 job。
 
 ## 捐赠
 
 - `POST /api/v1/donations/quote`
-- `POST /api/v1/donations`
+- `POST /api/v1/donations`（要求 `Idempotency-Key`）
 - `POST /api/v1/donations/{id}/revoke`
 - `GET /api/v1/donations/{id}/status`
 
-创建成功只返回凭据指纹尾部和一次性撤销令牌。撤销令牌只存 hash。
+创建成功只返回凭据指纹尾部和撤销令牌。撤销令牌只存 hash；同一幂等请求重试会返回同一 donation 和同一可恢复令牌，不会创建第二份信封。
 
 当前实现只接收 `kind=api`；代理和商家通道仍走人工流程。API key 存入 AES-256-GCM 临时信封，捐赠业务记录只有信封句柄和 HMAC 指纹尾部。新记录固定为 `quarantined`，撤销或到期即删除信封。
 

@@ -1,3 +1,5 @@
+import { MAX_OUTPUT_TOKENS_PER_ATTEMPT, type RunEstimate } from './probes'
+
 /* Price assumptions for the private-check cost estimate.
  *
  * Neither the archived detector nor the observation data carries pricing, so
@@ -30,6 +32,22 @@ export function estimateCost(
     (inputTokens / 1_000_000) * price.inputPerMillion +
     (outputTokens / 1_000_000) * price.outputPerMillion
   return base * multiplier
+}
+
+export function estimateMaximumRunCost(
+  estimate: RunEstimate,
+  retries: number,
+  price: PriceAssumption,
+  multiplier: number,
+): number {
+  const attemptsPerRequest = retries + 1
+  const maximumCost = estimateCost(
+    estimate.inputTokens * attemptsPerRequest,
+    estimate.requests * attemptsPerRequest * MAX_OUTPUT_TOKENS_PER_ATTEMPT,
+    price,
+    multiplier,
+  )
+  return Math.max(0.01, Math.ceil(maximumCost * 1.25 * 100) / 100)
 }
 
 export function formatUsd(value: number): string {

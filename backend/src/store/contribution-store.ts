@@ -3,6 +3,9 @@ import { AppError } from '../errors.js'
 
 export interface DonationRecord {
   id: string
+  quoteId: string
+  requestDigest: string
+  idempotencyKey: string
   kind: 'api'
   status: DonationStatus
   targetOrigin: string
@@ -33,7 +36,7 @@ export interface RegistryProposalRecord {
 }
 
 export interface ContributionStore {
-  createDonation(record: DonationRecord): Promise<void>
+  createDonation(record: DonationRecord): Promise<{ record: DonationRecord; created: boolean }>
   getDonation(id: string): Promise<DonationRecord | null>
   revokeDonation(id: string, revokedAt: string): Promise<DonationRecord>
   expireDonation(id: string): Promise<DonationRecord>
@@ -44,11 +47,23 @@ export interface ContributionStore {
 
 export class MemoryContributionStore implements ContributionStore {
   readonly #donations = new Map<string, DonationRecord>()
+  readonly #donationIdempotency = new Map<string, string>()
   readonly #proposals = new Map<string, RegistryProposalRecord>()
 
-  async createDonation(record: DonationRecord): Promise<void> {
+  async createDonation(record: DonationRecord): Promise<{ record: DonationRecord; created: boolean }> {
+    const existingId = this.#donationIdempotency.get(record.idempotencyKey)
+    if (existingId) {
+      const existing = this.#donations.get(existingId)
+      if (!existing) throw new Error('donation idempotency index is corrupt')
+      if (existing.requestDigest !== record.requestDigest) {
+        throw new AppError(409, 'idempotency_conflict', 'The idempotency key was already used for a different request.')
+      }
+      return { record: structuredClone(existing), created: false }
+    }
     if (this.#donations.has(record.id)) throw new AppError(409, 'donation_exists', 'The donation already exists.')
     this.#donations.set(record.id, structuredClone(record))
+    this.#donationIdempotency.set(record.idempotencyKey, record.id)
+    return { record: structuredClone(record), created: true }
   }
 
   async getDonation(id: string): Promise<DonationRecord | null> {
@@ -85,6 +100,7 @@ export class MemoryContributionStore implements ContributionStore {
 
   async close(): Promise<void> {
     this.#donations.clear()
+    this.#donationIdempotency.clear()
     this.#proposals.clear()
   }
 }

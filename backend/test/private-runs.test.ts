@@ -30,7 +30,7 @@ async function quote(app: Awaited<ReturnType<typeof buildApp>>) {
   const response = await app.inject({
     method: 'POST',
     url: '/api/v1/private-runs/quote',
-    payload: { base_url: 'https://api.example.com/v1/', model: 'gpt-5.6-sol', config: lowConfig, maximum_budget_usd: 1 },
+    payload: { base_url: 'https://api.example.com/v1/', model: 'gpt-5.6-sol', config: lowConfig, maximum_budget_usd: 2 },
   })
   assert.equal(response.statusCode, 200, response.body)
   return response.json()
@@ -41,8 +41,18 @@ test('quote is server-authoritative and rejects remote Native format', async (co
   context.after(() => app.close())
   const body = await quote(app)
   assert.equal(body.estimate.requests, 14)
+  assert.equal(body.estimate.maximum_attempts, 42)
+  assert.equal(body.estimate.maximum_output_tokens, 86_016)
   assert.equal(body.target_base_url, 'https://api.example.com/v1')
   assert.equal(body.disclosure_version, 'remote-normal-v1')
+
+  const overBudget = await app.inject({
+    method: 'POST',
+    url: '/api/v1/private-runs/quote',
+    payload: { base_url: 'https://api.example.com/v1', model: 'gpt-5.6-sol', config: lowConfig, maximum_budget_usd: 1 },
+  })
+  assert.equal(overBudget.statusCode, 400)
+  assert.equal(overBudget.json().code, 'budget_limit_exceeded')
 
   const rejected = await app.inject({
     method: 'POST',
@@ -92,9 +102,19 @@ test('private run lifecycle is capability-protected and idempotent', async (cont
   assert.equal(unauthorized.statusCode, 404)
 
   const authorization = { authorization: `Bearer ${run.owner_token}` }
-  const cancelled = await app.inject({ method: 'POST', url: `/api/v1/private-runs/${run.run_id}/cancel`, headers: authorization })
-  assert.equal(cancelled.statusCode, 200)
-  assert.equal(cancelled.json().status, 'cancelled')
+  const claimed = await services.runStore.claimNext('private-run-test-worker', 60)
+  assert.ok(claimed)
+  const lease = { workerId: 'private-run-test-worker', version: claimed.leaseVersion }
+  await services.runStore.transition(run.run_id, 'running', 'started', {}, lease)
+  await services.runStore.transition(run.run_id, 'scoring', 'scoring', {}, lease)
+  const cancelled = await Promise.all([
+    app.inject({ method: 'POST', url: `/api/v1/private-runs/${run.run_id}/cancel`, headers: authorization }),
+    app.inject({ method: 'POST', url: `/api/v1/private-runs/${run.run_id}/cancel`, headers: authorization }),
+  ])
+  for (const response of cancelled) {
+    assert.equal(response.statusCode, 200, response.body)
+    assert.equal(response.json().status, 'cancelled')
+  }
 
   const events = await app.inject({ method: 'GET', url: `/api/v1/private-runs/${run.run_id}/events`, headers: authorization })
   assert.equal(events.statusCode, 200)

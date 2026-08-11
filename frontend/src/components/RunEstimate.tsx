@@ -1,7 +1,7 @@
 import { Clock3, Coins, Hash, ShieldAlert } from 'lucide-react'
 import { estimateRun } from '../probes'
 import type { RunConfig } from '../probes'
-import { estimateCost, formatUsd } from '../pricing'
+import { estimateCost, estimateMaximumRunCost, formatUsd } from '../pricing'
 import type { PriceAssumption } from '../pricing'
 import { Pill } from './ui'
 import type { Tone } from '../scales'
@@ -63,6 +63,8 @@ export function RunEstimate({
 }) {
   const estimate = estimateRun(config)
   const cost = estimateCost(estimate.inputTokens, estimate.outputTokens, price, multiplier)
+  const maximumAttempts = estimate.requests * (config.retries + 1)
+  const maximumCost = estimateMaximumRunCost(estimate, config.retries, price, multiplier)
   const risk = riskOf(config, remote)
 
   return (
@@ -88,6 +90,11 @@ export function RunEstimate({
           <b>{estimate.requests}</b>
         </li>
         <li>
+          <Hash size={16} aria-hidden="true" />
+          <span>最大调用</span>
+          <b>{maximumAttempts}</b>
+        </li>
+        <li>
           <Clock3 size={16} aria-hidden="true" />
           <span>预计用时</span>
           <b>{formatDuration(estimate.seconds)}</b>
@@ -101,8 +108,8 @@ export function RunEstimate({
         </li>
         <li>
           <Coins size={16} aria-hidden="true" />
-          <span>预计花费</span>
-          <b>{formatUsd(cost)}</b>
+          <span>预计 / 上限</span>
+          <b>{formatUsd(cost)} / {formatUsd(maximumCost)}</b>
         </li>
       </ul>
 

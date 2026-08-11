@@ -5,7 +5,7 @@ const transitions: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
   queued: ['provisioning', 'cancelled', 'timed_out', 'failed', 'deleted'],
   provisioning: ['running', 'cancelled', 'timed_out', 'failed'],
   running: ['scoring', 'cancelled', 'timed_out', 'failed', 'incomplete'],
-  scoring: ['completed', 'failed', 'incomplete', 'timed_out'],
+  scoring: ['completed', 'failed', 'cancelled', 'incomplete', 'timed_out'],
   completed: ['deleted'],
   failed: ['deleted'],
   cancelled: ['deleted'],

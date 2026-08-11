@@ -3,11 +3,11 @@
 ## 已实现边界
 
 - Fastify 版本化 API、TypeBox 请求/响应契约、统一 problem 错误和 OpenAPI。
-- PostgreSQL 迁移、`FOR UPDATE SKIP LOCKED` worker 租约、任务事件与不可变报告。
+- PostgreSQL 迁移、`FOR UPDATE SKIP LOCKED` worker 租约、租约版本栅栏、逐任务调用预算、任务事件与不可变报告。
 - 私有检测 quote、创建、Bearer 能力令牌、SSE、取消、报告和逻辑删除。
 - HTTPS 443 目标限制、DNS/IP SSRF 校验、固定解析地址、禁止重定向、超时和 1 MiB 响应上限。
-- Normal Responses 执行器、只保存归一化观测的 Legacy 兼容评分器。
-- API 捐赠 quote、AES-256-GCM 信封、隔离状态、状态查询和撤销。
+- Normal Responses 执行器、2,048-token 硬输出上限（预计可见输出按 40 token）、逐项保存归一化观测的 Legacy 兼容评分器。
+- API 捐赠 quote、幂等创建、AES-256-GCM 信封、隔离状态、状态查询和撤销。
 - Dashboard/Provider/Registry 公开读模型，以及内容寻址的 GitOps Registry 提案。
 
 ## Legacy 判据数据库
@@ -17,7 +17,7 @@
 - `Legacy/gpt56_vnext/baselines/runtime_catalog.json`
 - `Legacy/gpt56_vnext/baselines/trusted_likelihood_v2.json`
 
-导入器验证 schema、跨文件 release ID、每个固定 prompt 的 SHA-256、baseline 内容 hash 与 calibration runtime signature。规范化结果包含 11 个探针、15 个模板、27 个模型/effort 签名、12 个拟合单元、4 个校准契约和 6 条有序 verdict 规则。
+导入器固定校验两份受信源文件的 SHA-256，并验证 schema、每个固定 prompt/developer prompt 的 SHA-256、baseline 内容 hash 与 calibration runtime signature。规范化结果包含 11 个探针、15 个模板、27 个模型/effort 签名、12 个拟合单元、4 个校准契约和 6 条有序 verdict 规则。
 
 生产运行时只读取数据库中的不可变 release，不执行 `Legacy/` 内代码。Registry 提案也不能原地覆盖已校准 prompt；修改必须生成新版本、重新校准并经 GitOps 审核。
 

@@ -44,7 +44,8 @@ function matchesSignature(modelId: string, effort: string, value: string, seed: 
   return value === signature.expectedValue || new RegExp(`^${signature.expectedValue}(?:\\.\\d+|\\d{2,})$`).test(value)
 }
 
-function classify(job: ProbeJob, raw: RawObservation, claimedModel: string, seed: ScoringReleaseSeed): StoredObservation {
+export function scoreObservation(run: RunRecord, raw: RawObservation, seed: ScoringReleaseSeed): StoredObservation {
+  const job = raw.job
   if (raw.status !== 'ok') {
     return {
       jobId: job.jobId, probeId: job.probeId, profile: job.profile, status: raw.status,
@@ -64,9 +65,9 @@ function classify(job: ProbeJob, raw: RawObservation, claimedModel: string, seed
       metadata['unsuccessful_reason'] = !answer.trim() || REFUSALS.some((item) => answer.toLowerCase().includes(item)) ? 'refusal_or_empty' : 'non_numeric'
     } else {
       const compatible = seed.models.map((item) => item.modelId).filter((model) => matchesSignature(model, job.effort, normalizedValue!, seed))
-      if (compatible.includes(claimedModel)) {
+      if (compatible.includes(run.model)) {
         classification = 'current_success'
-        metadata['shared_with_models'] = compatible.filter((model) => model !== claimedModel)
+        metadata['shared_with_models'] = compatible.filter((model) => model !== run.model)
       } else if (compatible.length) {
         classification = 'mixed'
         hardAnomaly = true
@@ -303,8 +304,7 @@ function probabilitySummary(run: RunRecord, rows: StoredObservation[], seed: Sco
   }
 }
 
-export function scoreRun(run: RunRecord, rawRows: RawObservation[], seed: ScoringReleaseSeed): ScoringResult {
-  const rows = rawRows.map((raw) => classify(raw.job, raw, run.model, seed))
+export function scoreStoredRun(run: RunRecord, rows: StoredObservation[], seed: ScoringReleaseSeed): ScoringResult {
   const juice = juiceSummary(run, rows)
   const outputHard = rows.some((item) => item.probeId.startsWith('output_') && item.hardAnomaly)
   const coverageHard = rows.some((item) => item.probeId === 'juice_coverage' && item.hardAnomaly)
@@ -346,4 +346,8 @@ export function scoreRun(run: RunRecord, rawRows: RawObservation[], seed: Scorin
     })),
     storedObservations: rows,
   }
+}
+
+export function scoreRun(run: RunRecord, rawRows: RawObservation[], seed: ScoringReleaseSeed): ScoringResult {
+  return scoreStoredRun(run, rawRows.map((raw) => scoreObservation(run, raw, seed)), seed)
 }
