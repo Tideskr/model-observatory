@@ -19,8 +19,6 @@ x-app-environment: &app-environment
 
 x-app-service: &app-service
   image: model-observatory:latest
-  build:
-    context: .
   environment: *app-environment
   depends_on:
     db:
@@ -44,6 +42,8 @@ services:
 
   migrate:
     <<: *app-service
+    build:
+      context: .
     restart: "no"
     command: ["sh", "-c", "node dist/db/migrate-cli.js && node dist/scoring/import-cli.js"]
 
